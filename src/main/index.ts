@@ -14,10 +14,12 @@ import { clearServerPing, measureServerPings } from './serverPing.ts';
 import { ConnectionQueue, waitForConnectionTask } from './connectionQueue.ts';
 import { getNetworkSettings, validateNetworkSettings } from './networkSettings.ts';
 import {
-  enableWindowsSystemProxy,
-  disableWindowsSystemProxy,
-  setWindowsTerminalProxyEnv,
+  enableSystemProxy,
+  disableSystemProxy,
+  enableTerminalProxy,
+  disableTerminalProxy,
   getTerminalProxyCommands,
+  type ProxyOperationResult,
 } from './systemProxy.ts';
 import { TunManager, checkIsAdmin, detectPhysicalGateway, resolveServerAddresses, type PhysicalRouteInfo } from './tunManager.ts';
 import type {
@@ -253,8 +255,8 @@ async function stopVpnResources(): Promise<void> {
   stopStatsPolling();
   const results = await Promise.allSettled([
     tunManager?.stop(),
-    disableWindowsSystemProxy(),
-    setWindowsTerminalProxyEnv(false, persistedData.httpPort, persistedData.socksPort),
+    disableSystemProxy(),
+    disableTerminalProxy(persistedData.httpPort, persistedData.socksPort),
     xrayRunner?.stop(),
   ]);
   if (results[0].status === 'fulfilled') vpnStatus.tunActive = false;
@@ -277,7 +279,13 @@ async function disconnectVpnNow(): Promise<void> {
     savePersistedData();
     broadcastStatus();
   }
-  addLog('system', 'info', 'Disconnected VPN and restored OS network settings.');
+  addLog(
+    'system',
+    'info',
+    process.platform === 'linux'
+      ? 'Stopped Xray and the local proxy listeners. No Linux desktop-wide proxy settings were changed.'
+      : 'Disconnected VPN and restored OS network settings.'
+  );
 }
 
 async function connectVpn(targetServerId?: string): Promise<{ ok: boolean; error?: string }> {
@@ -317,6 +325,9 @@ async function connectVpnNow(targetServerId: string | undefined, signal: AbortSi
     validateNetworkSettings(persistedData, {});
     await stopVpnResources();
     signal.throwIfAborted();
+    if (persistedData.routingMode === 'tun' && process.platform !== 'win32') {
+      throw new Error('Full TUN mode is not available on Linux yet. Use Local Proxy mode.');
+    }
 
     let serverIps: string[] = [];
     let physicalRoute: PhysicalRouteInfo | undefined;
@@ -349,20 +360,23 @@ async function connectVpnNow(targetServerId: string | undefined, signal: AbortSi
       vpnStatus.tunActive = true;
       vpnStatus.systemProxyActive = false;
     } else {
-      await enableWindowsSystemProxy(persistedData.httpPort);
-      vpnStatus.systemProxyActive = true;
+      const proxyResult = await enableSystemProxy(persistedData.httpPort);
+      vpnStatus.systemProxyActive = proxyResult.applied;
       vpnStatus.tunActive = false;
       addLog(
         'system',
         'info',
-        `Windows System Proxy enabled -> 127.0.0.1:${persistedData.httpPort} (SOCKS5 -> 127.0.0.1:${persistedData.socksPort})`
+        proxyResult.applied
+          ? `Windows System Proxy enabled -> 127.0.0.1:${persistedData.httpPort} (SOCKS5 -> 127.0.0.1:${persistedData.socksPort})`
+          : `Local Proxy mode is active -> HTTP 127.0.0.1:${persistedData.httpPort}; SOCKS5 127.0.0.1:${persistedData.socksPort}. Configure each browser or terminal manually; desktop-wide proxy integration is pending.`
       );
     }
 
     signal.throwIfAborted();
     if (restoreTerminal) {
-      await setWindowsTerminalProxyEnv(true, persistedData.httpPort, persistedData.socksPort);
-      vpnStatus.terminalEnvActive = true;
+      const terminalResult = await enableTerminalProxy(persistedData.httpPort, persistedData.socksPort);
+      vpnStatus.terminalEnvActive = terminalResult.applied;
+      if (terminalResult.message) addLog('system', 'info', terminalResult.message);
       signal.throwIfAborted();
     }
     if (!xrayRunner.isRunning()) throw new Error('Xray stopped while connecting');
@@ -437,6 +451,9 @@ function registerIpcHandlers() {
 
   ipcMain.handle('vpn:set-routing-mode', async (_e, mode: RoutingMode) => {
     if (mode !== 'tun' && mode !== 'system_proxy') return { ok: false, error: 'Invalid routing mode' };
+    if (mode === 'tun' && process.platform !== 'win32') {
+      return { ok: false, error: 'Full TUN mode is not available on Linux yet. Use Local Proxy mode.' };
+    }
     if (mode === persistedData.routingMode) return { ok: true };
     const wasLive = vpnStatus.connected || vpnStatus.connecting;
     return connectionQueue.replace(async (signal) => {
@@ -457,20 +474,24 @@ function registerIpcHandlers() {
 
   ipcMain.handle('vpn:toggle-terminal-env', async (_e, enabled: boolean) => {
     try {
+      let terminalResult: ProxyOperationResult | undefined;
       await connectionQueue.enqueue(async () => {
         if (enabled && (!vpnStatus.connected || vpnStatus.connecting)) throw new Error('Connect the VPN before enabling terminal proxy variables.');
-        await setWindowsTerminalProxyEnv(enabled, persistedData.httpPort, persistedData.socksPort);
-        vpnStatus.terminalEnvActive = enabled;
+        terminalResult = enabled
+          ? await enableTerminalProxy(persistedData.httpPort, persistedData.socksPort)
+          : await disableTerminalProxy(persistedData.httpPort, persistedData.socksPort);
+        vpnStatus.terminalEnvActive = terminalResult.applied;
       });
+      const message = terminalResult?.message || (enabled
+        ? `Set Windows User Environment Variables (HTTP_PROXY=http://127.0.0.1:${persistedData.httpPort}, ALL_PROXY=socks5://127.0.0.1:${persistedData.socksPort}). New terminal windows will now route commands through Xray.`
+        : 'Restored the original Windows terminal proxy environment variables.');
       addLog(
         'system',
         'info',
-        enabled
-          ? `Set Windows User Environment Variables (HTTP_PROXY=http://127.0.0.1:${persistedData.httpPort}, ALL_PROXY=socks5://127.0.0.1:${persistedData.socksPort}). New terminal windows will now route commands through Xray.`
-          : 'Restored the original Windows terminal proxy environment variables.'
+        message
       );
       broadcastStatus();
-      return { ok: true };
+      return { ok: true, applied: vpnStatus.terminalEnvActive, message: terminalResult?.message };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return { ok: false, error: msg };
@@ -748,7 +769,9 @@ app.whenReady().then(async () => {
   addLog(
     'system',
     'info',
-    `Xray VPN Client initialized. Administrator Mode: ${vpnStatus.isAdmin ? 'YES (TUN Ready)' : 'NO (System Proxy / Terminal Env Ready)'}`
+    process.platform === 'linux'
+      ? 'Xray VPN Client initialized. Local Proxy mode is available; Linux TUN and desktop-wide proxy integration are pending.'
+      : `Xray VPN Client initialized. Administrator Mode: ${vpnStatus.isAdmin ? 'YES (TUN Ready)' : 'NO (System Proxy / Terminal Env Ready)'}`
   );
 });
 

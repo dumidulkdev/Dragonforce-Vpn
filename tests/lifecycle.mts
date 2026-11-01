@@ -315,6 +315,36 @@ await test('standalone: failed elevation preserves the current controller and co
   await b.call('disconnect');
 });
 
+await test('standalone: Linux connects in local proxy mode without changing OS proxy settings', async () => {
+  const b = await backend('standalone', seed(), { platform: 'linux' });
+  const connected = await b.call('connect');
+  assert.equal(connected.ok, true);
+  let state = await b.state();
+  assert.equal(state.status.connected, true);
+  assert.equal(state.status.systemProxyActive, false);
+  assert.equal(state.status.terminalEnvActive, false);
+  assert.equal(b.controls.proxy, false);
+  assert.ok(state.logs.some((entry: any) => entry.message.includes('Local Proxy mode is active')));
+
+  const terminal = await b.call('terminal-env', { enabled: true });
+  assert.equal(terminal.ok, true);
+  assert.equal(terminal.applied, false);
+  assert.match(terminal.message, /were not changed/);
+  state = await b.state();
+  assert.equal(state.status.terminalEnvActive, false);
+  assert.equal(b.controls.terminal, false);
+
+  const tun = await b.call('routing-mode', { mode: 'tun' });
+  assert.equal(tun.ok, false);
+  assert.equal(tun.httpStatus, 501);
+  assert.match(tun.error, /not available on Linux/);
+
+  await b.call('disconnect');
+  state = await b.state();
+  assert.equal(state.status.connected, false);
+  assert.ok(state.logs.some((entry: any) => entry.message.includes('No Linux desktop-wide proxy settings were changed')));
+});
+
 await test('standalone: Linux elevation reports the pending polkit implementation', async () => {
   const b = await backend('standalone', seed(), { platform: 'linux' });
   const result = await b.call('relaunch-admin');

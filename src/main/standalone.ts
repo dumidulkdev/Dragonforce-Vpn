@@ -13,10 +13,12 @@ import { fetchLeafCertSha256 } from './certPin.ts';
 import { XrayRunner, testProxyConnectivity } from './xrayRunner.ts';
 import { clearServerPing, measureServerPings } from './serverPing.ts';
 import {
-  enableWindowsSystemProxy,
-  disableWindowsSystemProxy,
-  setWindowsTerminalProxyEnv,
+  enableSystemProxy,
+  disableSystemProxy,
+  enableTerminalProxy,
+  disableTerminalProxy,
   getTerminalProxyCommands,
+  type ProxyOperationResult,
 } from './systemProxy.ts';
 import {
   TunManager,
@@ -461,8 +463,8 @@ async function stopVpnResources(): Promise<void> {
   stopStatsPolling();
   const results = await Promise.allSettled([
     tunManager.stop(),
-    disableWindowsSystemProxy(),
-    setWindowsTerminalProxyEnv(false, persistedData.httpPort, persistedData.socksPort),
+    disableSystemProxy(),
+    disableTerminalProxy(persistedData.httpPort, persistedData.socksPort),
     xrayRunner.stop(),
   ]);
   if (results[0].status === 'fulfilled') vpnStatus.tunActive = false;
@@ -486,7 +488,13 @@ async function disconnectVpnNow(): Promise<void> {
     savePersistedData();
     broadcastStatus();
   }
-  addLog('system', 'info', 'Disconnected VPN and restored OS network settings.');
+  addLog(
+    'system',
+    'info',
+    process.platform === 'linux'
+      ? 'Stopped Xray and the local proxy listeners. No Linux desktop-wide proxy settings were changed.'
+      : 'Disconnected VPN and restored OS network settings.'
+  );
   void refreshOriginGeo();
 }
 
@@ -528,6 +536,9 @@ async function connectVpnNow(targetServerId: string | undefined, signal: AbortSi
     validateNetworkSettings(persistedData, {}, PORT);
     await stopVpnResources();
     signal.throwIfAborted();
+    if (persistedData.routingMode === 'tun' && process.platform !== 'win32') {
+      throw new Error('Full TUN mode is not available on Linux yet. Use Local Proxy mode.');
+    }
 
     let serverIps: string[] = [];
     let physicalRoute: PhysicalRouteInfo | undefined;
@@ -578,29 +589,32 @@ async function connectVpnNow(targetServerId: string | undefined, signal: AbortSi
       signal.throwIfAborted();
       // Also enable Windows System Proxy alongside TUN so browsers connect directly
       // to 127.0.0.1:httpPort via HTTP CONNECT (zero OS DNS lag, zero QUIC timeout).
-      await enableWindowsSystemProxy(persistedData.httpPort);
+      const proxyResult = await enableSystemProxy(persistedData.httpPort);
       vpnStatus.tunActive = true;
-      vpnStatus.systemProxyActive = true;
+      vpnStatus.systemProxyActive = proxyResult.applied;
       addLog(
         'system',
         'info',
         `Hybrid TUN + System Proxy enabled -> Browsers use 127.0.0.1:${persistedData.httpPort}; all other apps use XrayTUN.`
       );
     } else {
-      await enableWindowsSystemProxy(persistedData.httpPort);
-      vpnStatus.systemProxyActive = true;
+      const proxyResult = await enableSystemProxy(persistedData.httpPort);
+      vpnStatus.systemProxyActive = proxyResult.applied;
       vpnStatus.tunActive = false;
       addLog(
         'system',
         'info',
-        `Windows System Proxy enabled -> 127.0.0.1:${persistedData.httpPort} (SOCKS5 -> 127.0.0.1:${persistedData.socksPort})`
+        proxyResult.applied
+          ? `Windows System Proxy enabled -> 127.0.0.1:${persistedData.httpPort} (SOCKS5 -> 127.0.0.1:${persistedData.socksPort})`
+          : `Local Proxy mode is active -> HTTP 127.0.0.1:${persistedData.httpPort}; SOCKS5 127.0.0.1:${persistedData.socksPort}. Configure each browser or terminal manually; desktop-wide proxy integration is pending.`
       );
     }
 
     signal.throwIfAborted();
     if (restoreTerminal) {
-      await setWindowsTerminalProxyEnv(true, persistedData.httpPort, persistedData.socksPort);
-      vpnStatus.terminalEnvActive = true;
+      const terminalResult = await enableTerminalProxy(persistedData.httpPort, persistedData.socksPort);
+      vpnStatus.terminalEnvActive = terminalResult.applied;
+      if (terminalResult.message) addLog('system', 'info', terminalResult.message);
       signal.throwIfAborted();
     }
     if (!xrayRunner.isRunning()) throw new Error('Xray stopped while connecting');
@@ -836,6 +850,10 @@ async function startServer() {
           sendJson(res, { ok: false, error: 'Invalid routing mode' }, 400);
           return;
         }
+        if (body.mode === 'tun' && process.platform !== 'win32') {
+          sendJson(res, { ok: false, error: 'Full TUN mode is not available on Linux yet. Use Local Proxy mode.' }, 501);
+          return;
+        }
         const mode = body.mode;
         const result = mode === persistedData.routingMode ? { ok: true } : await changeRoutingConfig(() => {
           const previous = persistedData.routingMode;
@@ -849,20 +867,24 @@ async function startServer() {
       if (req.method === 'POST' && pathname === '/api/terminal-env') {
         const body = await readJsonBody(req);
         const enabled = Boolean(body.enabled);
+        let terminalResult: ProxyOperationResult | undefined;
         await connectionQueue.enqueue(async () => {
           if (enabled && (!vpnStatus.connected || vpnStatus.connecting)) throw new Error('Connect the VPN before enabling terminal proxy variables.');
-          await setWindowsTerminalProxyEnv(enabled, persistedData.httpPort, persistedData.socksPort);
-          vpnStatus.terminalEnvActive = enabled;
+          terminalResult = enabled
+            ? await enableTerminalProxy(persistedData.httpPort, persistedData.socksPort)
+            : await disableTerminalProxy(persistedData.httpPort, persistedData.socksPort);
+          vpnStatus.terminalEnvActive = terminalResult.applied;
         });
+        const message = terminalResult?.message || (enabled
+          ? `Enabled Windows User Proxy Environment Variables (HTTP_PROXY=http://127.0.0.1:${persistedData.httpPort}, ALL_PROXY=socks5://127.0.0.1:${persistedData.socksPort}). Open a new terminal to run npm/git/pip/curl through Xray.`
+          : 'Restored the original Windows terminal proxy environment variables.');
         addLog(
           'system',
           'info',
-          enabled
-            ? `Enabled Windows User Proxy Environment Variables (HTTP_PROXY=http://127.0.0.1:${persistedData.httpPort}, ALL_PROXY=socks5://127.0.0.1:${persistedData.socksPort}). Open a new terminal to run npm/git/pip/curl through Xray.`
-            : 'Restored the original Windows terminal proxy environment variables.'
+          message
         );
         broadcastStatus();
-        sendJson(res, { ok: true });
+        sendJson(res, { ok: true, applied: vpnStatus.terminalEnvActive, message: terminalResult?.message });
         return;
       }
 
@@ -1606,14 +1628,22 @@ async function startServer() {
     // Read state only after the previous controller has saved and released ownership.
     loadPersistedData();
     checkBinaries();
-    addLog('system', 'info', `Xray VPN Client ready. Admin privileges: ${vpnStatus.isAdmin ? 'YES (Full TUN Mode Ready)' : 'NO (System Proxy & Terminal Env Ready)'}`);
+    addLog(
+      'system',
+      'info',
+      process.platform === 'linux'
+        ? 'Xray VPN Client ready. Local Proxy mode is available; Linux TUN and desktop-wide proxy integration are pending.'
+        : `Xray VPN Client ready. Admin privileges: ${vpnStatus.isAdmin ? 'YES (Full TUN Mode Ready)' : 'NO (System Proxy & Terminal Env Ready)'}`
+    );
     void refreshOriginGeo();
     void ensureServerGeo();
     void measureServerPings(persistedData.servers, broadcastData);
     const appUrl = `http://127.0.0.1:${PORT}`;
     console.log(`\n========================================================`);
     console.log(`  DragonForce Vpn is running at: ${appUrl}`);
-    console.log(`  Admin Mode (TUN Ready): ${vpnStatus.isAdmin ? 'YES' : 'NO'}`);
+    console.log(process.platform === 'linux'
+      ? '  Linux Mode: Local Proxy Ready (TUN pending)'
+      : `  Admin Mode (TUN Ready): ${vpnStatus.isAdmin ? 'YES' : 'NO'}`);
     console.log(`========================================================\n`);
     notifyDesktop({ type: 'ready' });
     if (!process.env.NO_OPEN_WINDOW) {

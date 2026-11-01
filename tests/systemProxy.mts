@@ -4,12 +4,13 @@ import vm from 'node:vm';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 
-async function virtualRegistry(initial: Record<string, any>) {
+async function virtualRegistry(initial: Record<string, any>, platform: NodeJS.Platform = 'win32') {
   const registry = new Map(Object.entries(structuredClone(initial)));
-  const controls = { failOn: '' };
+  const controls = { failOn: '', commands: [] as Array<{ file: string; args: string[] }>, logs: [] as string[] };
   const keyOf = (key: string, name: string) => (key + '/' + name).toLowerCase();
   function execFile(file: string, args: string[], ...rest: any[]) {
     const done = rest.at(-1);
+    controls.commands.push({ file, args });
     let stdout = '';
     if (file === 'powershell.exe' && args.at(-1)!.includes('OpenSubKey')) {
       const script = args.at(-1)!;
@@ -34,7 +35,10 @@ async function virtualRegistry(initial: Record<string, any>) {
     }
     done(null, { stdout, stderr: '' });
   }
-  const context = vm.createContext({});
+  const context = vm.createContext({
+    process: { platform },
+    console: { log(message: string) { controls.logs.push(message); } },
+  });
   const entry = new vm.SourceTextModule(stripTypeScriptTypes(fs.readFileSync('src/main/systemProxy.ts', 'utf8')), { context });
   await entry.link(async name => {
     const values = name === 'node:child_process' ? { execFile } : await import(name);
@@ -84,4 +88,35 @@ await test('terminal cleanup restores existing values and expandable-string type
   await api.setWindowsTerminalProxyEnv(true, 20809, 20808);
   await api.setWindowsTerminalProxyEnv(false, 20809, 20808);
   assert.deepEqual(Object.fromEntries(registry), initial);
+});
+
+await test('platform wrappers delegate to the existing Windows implementations', async () => {
+  const { api, registry } = await virtualRegistry(existing);
+  assert.equal((await api.enableSystemProxy(10809)).applied, true);
+  assert.equal(registry.get(prefix + 'proxyserver')?.value, '127.0.0.1:10809');
+  assert.equal((await api.disableSystemProxy()).applied, false);
+  assert.deepEqual(Object.fromEntries(registry), existing);
+
+  assert.equal((await api.enableTerminalProxy(10809, 10808)).applied, true);
+  assert.equal((await api.disableTerminalProxy(10809, 10808)).applied, false);
+});
+
+await test('Linux wrappers leave Registry and terminal environment untouched', async () => {
+  const { api, registry, controls } = await virtualRegistry(existing, 'linux');
+  const before = Object.fromEntries(registry);
+
+  const system = await api.enableSystemProxy(10809);
+  const terminal = await api.enableTerminalProxy(10809, 10808);
+  const disabledSystem = await api.disableSystemProxy();
+  const disabledTerminal = await api.disableTerminalProxy(10809, 10808);
+
+  assert.equal(system.applied, false);
+  assert.match(system.message, /Local Proxy mode is active/);
+  assert.equal(terminal.applied, false);
+  assert.match(terminal.message, /were not changed/);
+  assert.equal(disabledSystem.applied, false);
+  assert.equal(disabledTerminal.applied, false);
+  assert.deepEqual(Object.fromEntries(registry), before);
+  assert.deepEqual(controls.commands, []);
+  assert.equal(controls.logs.length, 2);
 });

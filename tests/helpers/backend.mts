@@ -147,9 +147,27 @@ export async function backend(
     },
     './xrayRunner.ts': { XrayRunner: FakeXray, testProxyConnectivity: async () => ({ ok: true, latencyMs: 1 }) },
     './systemProxy.ts': {
-      enableWindowsSystemProxy: async () => { controls.proxy = true; },
-      disableWindowsSystemProxy: async () => { controls.proxy = false; },
-      setWindowsTerminalProxyEnv: async (enabled: boolean) => { controls.terminal = enabled; },
+      enableSystemProxy: async () => {
+        if ((options.platform || 'win32') === 'win32') {
+          controls.proxy = true;
+          return { applied: true };
+        }
+        return { applied: false, message: 'Local Proxy mode is active. Desktop-wide proxy integration is pending.' };
+      },
+      disableSystemProxy: async () => { controls.proxy = false; return { applied: false }; },
+      enableTerminalProxy: async () => {
+        if ((options.platform || 'win32') === 'win32') {
+          controls.terminal = true;
+          return { applied: true };
+        }
+        return { applied: false, message: 'Linux terminal proxy variables were not changed.' };
+      },
+      disableTerminalProxy: async () => {
+        controls.terminal = false;
+        return (options.platform || 'win32') === 'linux'
+          ? { applied: false, message: 'Linux terminal proxy variables were not changed, so there is nothing to restore.' }
+          : { applied: false };
+      },
       getTerminalProxyCommands: () => ({}),
     },
     './tunManager.ts': {

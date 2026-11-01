@@ -227,6 +227,61 @@ export async function setWindowsTerminalProxyEnv(
   });
 }
 
+export interface ProxyOperationResult {
+  applied: boolean;
+  message?: string;
+}
+
+function unsupportedPlatform(feature: string): Error {
+  return new Error(`${feature} is not supported on ${process.platform}.`);
+}
+
+export async function enableSystemProxy(httpPort: number): Promise<ProxyOperationResult> {
+  if (process.platform === 'win32') {
+    await enableWindowsSystemProxy(httpPort);
+    return { applied: true };
+  }
+  if (process.platform === 'linux') {
+    const message = `Local Proxy mode is active. Configure an HTTP proxy at 127.0.0.1:${httpPort} or use the SOCKS5 port shown in Settings. Desktop-wide proxy integration is pending.`;
+    console.log(message);
+    return { applied: false, message };
+  }
+  throw unsupportedPlatform('System proxy integration');
+}
+
+export async function disableSystemProxy(): Promise<ProxyOperationResult> {
+  if (process.platform === 'win32') {
+    await disableWindowsSystemProxy();
+    return { applied: false };
+  }
+  if (process.platform === 'linux') return { applied: false };
+  throw unsupportedPlatform('System proxy integration');
+}
+
+export async function enableTerminalProxy(httpPort: number, socksPort: number): Promise<ProxyOperationResult> {
+  if (process.platform === 'win32') {
+    await setWindowsTerminalProxyEnv(true, httpPort, socksPort);
+    return { applied: true };
+  }
+  if (process.platform === 'linux') {
+    const message = `Linux terminal proxy variables were not changed. Configure HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:${httpPort} and ALL_PROXY=socks5://127.0.0.1:${socksPort} in the terminal session that should use the local proxy.`;
+    console.log(message);
+    return { applied: false, message };
+  }
+  throw unsupportedPlatform('Terminal proxy integration');
+}
+
+export async function disableTerminalProxy(httpPort: number, socksPort: number): Promise<ProxyOperationResult> {
+  if (process.platform === 'win32') {
+    await setWindowsTerminalProxyEnv(false, httpPort, socksPort);
+    return { applied: false };
+  }
+  if (process.platform === 'linux') {
+    return { applied: false, message: 'Linux terminal proxy variables were not changed, so there is nothing to restore.' };
+  }
+  throw unsupportedPlatform('Terminal proxy integration');
+}
+
 export function getTerminalProxyCommands(httpPort: number, socksPort: number): {
   powershell: string;
   cmd: string;
