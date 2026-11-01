@@ -28,6 +28,7 @@ import type {
   ServerNode,
   SubscriptionItem,
 } from './types.ts';
+import { resolveNativeBinaries } from './binaries.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -137,10 +138,11 @@ function savePersistedData(): void {
 
 function checkBinaries() {
   const binDir = resolveBinDir();
+  const binaries = resolveNativeBinaries({ bundledBinDir: binDir });
   vpnStatus.binariesReady = {
-    xray: fs.existsSync(path.join(binDir, 'xray.exe')),
-    tun2socks: fs.existsSync(path.join(binDir, 'tun2socks.exe')),
-    wintun: fs.existsSync(path.join(binDir, 'wintun.dll')),
+    xray: Boolean(binaries.xrayPath),
+    tun2socks: Boolean(binaries.tun2socksPath),
+    wintun: process.platform !== 'win32' || Boolean(binaries.wintunPath),
   };
 }
 
@@ -476,6 +478,9 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('vpn:relaunch-admin', async () => {
+    if (process.platform !== 'win32') {
+      return { ok: false, error: 'Linux privilege elevation is not implemented yet; polkit integration is pending.' };
+    }
     try {
       await disconnectVpn();
       const exePath = process.execPath;

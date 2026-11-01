@@ -23,7 +23,11 @@ export const seed = () => ({
 });
 
 /** Executes the actual entry point with virtual storage, processes, HTTP, timers and OS settings. */
-export async function backend(kind: 'standalone' | 'electron' = 'standalone', initial: any = seed(), options: { occupiedPort?: boolean } = {}) {
+export async function backend(
+  kind: 'standalone' | 'electron' = 'standalone',
+  initial: any = seed(),
+  options: { occupiedPort?: boolean; platform?: NodeJS.Platform } = {}
+) {
   const controls: any = {
     running: false, actualServer: null, starts: 0, stops: 0, proxy: false, terminal: false,
     tun: false, requests: 0, stats: { upBytes: 0, downBytes: 0 }, failStart: false,
@@ -131,6 +135,16 @@ export async function backend(kind: 'standalone' | 'electron' = 'standalone', in
       ipcMain: { handle: (name: string, callback: any) => ipc.set(name, callback) },
     },
     './adblockEngine.ts': { ...shield, AdBlockLogWatcher: class { reset() {} poll() { return 0; } } },
+    './binaries.ts': {
+      resolveNativeBinaries: () => ({
+        xrayPath: path.join(root, 'resources/bin/xray.exe'),
+        tun2socksPath: path.join(root, 'resources/bin/tun2socks.exe'),
+        wintunPath: path.join(root, 'resources/bin/wintun.dll'),
+        geoipPath: null,
+        geositePath: null,
+        xrayAssetDir: null,
+      }),
+    },
     './xrayRunner.ts': { XrayRunner: FakeXray, testProxyConnectivity: async () => ({ ok: true, latencyMs: 1 }) },
     './systemProxy.ts': {
       enableWindowsSystemProxy: async () => { controls.proxy = true; },
@@ -180,6 +194,7 @@ export async function backend(kind: 'standalone' | 'electron' = 'standalone', in
     __dirname: path.dirname(sourcePath),
     process: {
       env: { NO_OPEN_WINDOW: '1' }, cwd: () => root, execPath: process.execPath,
+      platform: options.platform || 'win32', arch: 'x64',
       on: (name: string, callback: any) => signals.set(name, callback),
       exit() { controls.exited = true; },
     },

@@ -54,6 +54,7 @@ import {
   parseSplitTargetInput,
   sanitizeDomainEntry,
 } from './splitTunnelEngine.ts';
+import { resolveNativeBinaries } from './binaries.ts';
 import type {
   LogEntry,
   PersistedData,
@@ -147,10 +148,12 @@ let vpnStatus: VpnStatus = {
 };
 
 function checkBinaries() {
+  const binaries = resolveNativeBinaries({ bundledBinDir: binDir });
   vpnStatus.binariesReady = {
-    xray: fs.existsSync(path.join(binDir, 'xray.exe')),
-    tun2socks: fs.existsSync(path.join(binDir, 'tun2socks.exe')),
-    wintun: fs.existsSync(path.join(binDir, 'wintun.dll')),
+    xray: Boolean(binaries.xrayPath),
+    tun2socks: Boolean(binaries.tun2socksPath),
+    // The existing boolean means the platform's driver requirement is satisfied.
+    wintun: process.platform !== 'win32' || Boolean(binaries.wintunPath),
   };
 }
 
@@ -686,6 +689,16 @@ function sendJson(res: http.ServerResponse, data: unknown, statusCode = 200) {
 }
 
 function openDesktopAppWindow(url: string) {
+  if (process.platform === 'linux') {
+    execFile('xdg-open', [url], { windowsHide: true }, error => {
+      if (error) console.error(`Could not open the dashboard with xdg-open: ${error.message}`);
+    });
+    return;
+  }
+  if (process.platform !== 'win32') {
+    console.log(`Open the DragonForce VPN dashboard at ${url}`);
+    return;
+  }
   const edgePaths = [
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -854,6 +867,13 @@ async function startServer() {
       }
 
       if (req.method === 'POST' && pathname === '/api/relaunch-admin') {
+        if (process.platform !== 'win32') {
+          sendJson(res, {
+            ok: false,
+            error: 'Linux privilege elevation is not implemented yet; polkit integration is pending.',
+          }, 501);
+          return;
+        }
         // Keep this controller alive until elevation succeeds. The replacement
         // then uses authenticated takeover to restore networking and release the port.
         if (process.env.VPN_DESKTOP_HOST === '1' && process.send) {

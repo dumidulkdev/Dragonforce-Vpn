@@ -20,7 +20,11 @@ let elevation: Promise<void> | null = null;
 let controllerOutput = '';
 
 app.setName('DragonForce VPN');
-app.setAppUserModelId('com.dragonforce.vpn');
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.dragonforce.vpn');
+} else if (process.platform === 'linux' && typeof app.setDesktopName === 'function') {
+  app.setDesktopName('dragonforce-vpn.desktop');
+}
 
 function log(message: string) {
   controllerOutput = (controllerOutput + message).slice(-12000);
@@ -57,6 +61,9 @@ function quoteArgument(value: string): string {
 }
 
 async function relaunchElevated() {
+  if (process.platform !== 'win32') {
+    throw new Error('Linux privilege elevation is not implemented yet; polkit integration is pending.');
+  }
   const executable = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
   const args = [
     ...(app.isPackaged ? [] : [app.getAppPath()]),
@@ -112,7 +119,7 @@ async function createWindow() {
   window.on('close', event => {
     if (!exitAllowed && controller) { event.preventDefault(); app.quit(); }
   });
-  window.on('session-end', requestShutdown);
+  if (process.platform === 'win32') window.on('session-end', requestShutdown);
   window.on('closed', () => { mainWindow = null; });
   await window.loadURL(appUrl);
 }

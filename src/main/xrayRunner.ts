@@ -7,6 +7,7 @@ import { generateXrayConfig, type XrayConfigOptions } from './xrayConfig.ts';
 import type { ServerNode } from './types.ts';
 import { XRAY_API_PORT } from './networkSettings.ts';
 import { stopChildProcess } from './childProcess.ts';
+import { nativeBinaryNames, resolveNativeBinaries } from './binaries.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -14,6 +15,8 @@ export class XrayRunner {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private binDir: string;
   private configPath: string;
+  private xrayPath: string | null = null;
+  private xrayEnv: NodeJS.ProcessEnv | undefined;
   private apiPort = XRAY_API_PORT;
   private onLog: (level: 'info' | 'warn' | 'error', msg: string) => void;
   private onUnexpectedExit: (code: number | null) => void;
@@ -37,10 +40,16 @@ export class XrayRunner {
   public async start(node: ServerNode, options: XrayConfigOptions = {}): Promise<void> {
     await this.stop();
 
-    const xrayExe = path.join(this.binDir, 'xray.exe');
-    if (!fs.existsSync(xrayExe)) {
-      throw new Error(`xray.exe not found at ${xrayExe}. Please run binary setup first.`);
+    const binaries = resolveNativeBinaries({ bundledBinDir: this.binDir });
+    const xrayExe = binaries.xrayPath;
+    if (!xrayExe) {
+      const expected = nativeBinaryNames().xray;
+      throw new Error(`${expected} was not found or is not executable. Configure DRAGONFORCE_XRAY_PATH or install the native binary.`);
     }
+    this.xrayPath = xrayExe;
+    this.xrayEnv = process.platform === 'linux' && binaries.xrayAssetDir
+      ? { ...process.env, XRAY_LOCATION_ASSET: binaries.xrayAssetDir }
+      : undefined;
 
     this.apiPort = options.apiPort ?? XRAY_API_PORT;
     const configObj = generateXrayConfig(node, options);
@@ -53,7 +62,8 @@ export class XrayRunner {
     );
 
     const proc = spawn(xrayExe, ['run', '-c', this.configPath], {
-      cwd: this.binDir,
+      cwd: path.dirname(xrayExe),
+      env: this.xrayEnv,
       windowsHide: true,
     });
     this.proc = proc;
@@ -130,13 +140,14 @@ export class XrayRunner {
    */
   public async queryTrafficStats(): Promise<{ upBytes: number; downBytes: number } | null> {
     if (!this.proc) return null;
-    const xrayExe = path.join(this.binDir, 'xray.exe');
+    const xrayExe = this.xrayPath;
+    if (!xrayExe) return null;
 
     try {
       const { stdout } = await execFileAsync(
         xrayExe,
         ['api', 'statsquery', `--server=127.0.0.1:${this.apiPort}`],
-        { timeout: 2000, windowsHide: true }
+        { timeout: 2000, windowsHide: true, env: this.xrayEnv }
       );
 
       let upBytes = 0;

@@ -6,17 +6,22 @@ import { EventEmitter } from 'node:events';
 import { stripTypeScriptTypes } from 'node:module';
 import { test } from 'node:test';
 
-async function desktop(options: { portable?: string; elevationError?: Error; lock?: boolean } = {}) {
+async function desktop(options: { portable?: string; elevationError?: Error; lock?: boolean; platform?: NodeJS.Platform } = {}) {
   const root = path.resolve('.');
   const dataDir = path.join(root, 'test-data');
-  const controls: any = { messages: [], errors: [], quit: false, locks: 0, released: 0 };
+  const controls: any = {
+    messages: [], errors: [], quit: false, locks: 0, released: 0,
+    appUserModelIds: [], desktopNames: [], execCalls: 0,
+  };
   const child = Object.assign(new EventEmitter(), {
     pid: 999, exitCode: null, connected: true, stdout: new EventEmitter(), stderr: new EventEmitter(),
     send(message: any, callback?: (error?: Error) => void) { controls.messages.push(message); callback?.(); },
   });
   const app = Object.assign(new EventEmitter(), {
     isPackaged: true, getAppPath: () => path.join(root, 'resources/app.asar'), getPath: () => root,
-    getVersion: () => '2.4.0', setPath() {}, setName() {}, setAppUserModelId() {},
+    getVersion: () => '2.4.0', setPath() {}, setName() {},
+    setAppUserModelId(value: string) { controls.appUserModelIds.push(value); },
+    setDesktopName(value: string) { controls.desktopNames.push(value); },
     requestSingleInstanceLock() { controls.locks++; return options.lock !== false; },
     releaseSingleInstanceLock() { controls.released++; },
     whenReady: () => Promise.resolve(),
@@ -41,6 +46,7 @@ async function desktop(options: { portable?: string; elevationError?: Error; loc
     'node:child_process': {
       fork(file: string, _args: string[], config: any) { controls.fork = { file, config }; return child; },
       execFile(_exe: string, args: string[], _config: any, callback: any) {
+        controls.execCalls++;
         controls.elevationScript = Buffer.from(args.at(-1)!, 'base64').toString('utf16le');
         callback(options.elevationError || null, '');
       },
@@ -51,6 +57,7 @@ async function desktop(options: { portable?: string; elevationError?: Error; loc
     process: {
       argv: ['DragonForce-VPN.exe'], execPath: path.join(root, 'extracted/DragonForce-VPN.exe'),
       resourcesPath: path.join(root, 'resources'), arch: 'x64',
+      platform: options.platform || 'win32',
       env: { VPN_DATA_DIR: dataDir, VPN_UI_PORT: '18765', PORTABLE_EXECUTABLE_FILE: options.portable },
     },
   });
@@ -79,6 +86,19 @@ await test('desktop: packaged controller uses external native resources and writ
   await d.message({ type: 'ready' });
   assert.equal(d.controls.url, 'http://127.0.0.1:18765');
   assert.equal(d.controls.windowConfig.webPreferences.nodeIntegration, false);
+  assert.deepEqual(d.controls.appUserModelIds, ['com.dragonforce.vpn']);
+  assert.equal(d.controls.window.listenerCount('session-end'), 1);
+});
+
+await test('desktop: Linux uses a desktop identity and rejects Windows elevation cleanly', async () => {
+  const d = await desktop({ platform: 'linux' });
+  assert.deepEqual(d.controls.appUserModelIds, []);
+  assert.deepEqual(d.controls.desktopNames, ['dragonforce-vpn.desktop']);
+  await d.message({ type: 'ready' });
+  assert.equal(d.controls.window.listenerCount('session-end'), 0);
+  await d.message({ type: 'relaunch-admin', id: 'linux-request' });
+  assert.match(d.controls.messages.at(-1).error, /polkit integration is pending/);
+  assert.equal(d.controls.execCalls, 0);
 });
 
 await test('desktop: closing waits for controller cleanup and a failed cleanup can be retried', async () => {

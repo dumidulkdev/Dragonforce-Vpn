@@ -315,6 +315,15 @@ await test('standalone: failed elevation preserves the current controller and co
   await b.call('disconnect');
 });
 
+await test('standalone: Linux elevation reports the pending polkit implementation', async () => {
+  const b = await backend('standalone', seed(), { platform: 'linux' });
+  const result = await b.call('relaunch-admin');
+  assert.equal(result.ok, false);
+  assert.equal(result.httpStatus, 501);
+  assert.match(result.error, /polkit integration is pending/);
+  assert.equal(b.controls.elevationArgs, undefined);
+});
+
 await test('standalone: controller takeover initializes saved state exactly once after port release', async () => {
   const b = await backend('standalone', seed(), { occupiedPort: true });
   assert.equal(b.controls.listenAttempts, 2);

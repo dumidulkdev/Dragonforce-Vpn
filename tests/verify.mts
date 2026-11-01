@@ -6,6 +6,7 @@ import { after } from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { parseShareLink, parseMultipleLinks } from '../src/main/parser.ts';
 import { generateXrayConfig } from '../src/main/xrayConfig.ts';
+import { resolveNativeBinaries } from '../src/main/binaries.ts';
 
 console.log('--- Running Xray VPN Client Verification Suite ---');
 
@@ -91,26 +92,38 @@ const visionNodes = ['xtls-rprx-vision', 'xtls-rprx-vision-udp443'].map((flow) =
 });
 console.log('[PASS] VLESS no-flow import/saved-profile compatibility and Vision preservation');
 
-// 4. Test Xray Config Generator & Xray-core native config validation (`xray.exe run -test`)
-const xrayBin = path.resolve(process.env.VPN_BIN_DIR || 'resources/bin', 'xray.exe');
+// 4. Test Xray Config Generator & Xray-core native config validation (`xray run -test`)
+const nativeBinaries = resolveNativeBinaries({
+  bundledBinDir: path.resolve(process.env.VPN_BIN_DIR || 'resources/bin'),
+});
+const xrayBin = nativeBinaries.xrayPath;
+function validateWithXray(configPath: string): string | null {
+  if (!xrayBin) return null;
+  const assetEnv = nativeBinaries.xrayAssetDir
+    ? { ...process.env, XRAY_LOCATION_ASSET: nativeBinaries.xrayAssetDir }
+    : undefined;
+  return execFileSync(xrayBin, ['run', '-test', '-c', configPath], {
+    cwd: path.dirname(xrayBin),
+    encoding: 'utf-8',
+    env: assetEnv,
+  });
+}
 const tempRoot = process.platform === 'win32' ? path.join(process.env.LOCALAPPDATA!, 'Temp', 'opencode') : os.tmpdir();
 fs.mkdirSync(tempRoot, { recursive: true });
 const configDir = fs.mkdtempSync(path.join(tempRoot, 'vpn-config-tests-'));
 after(() => fs.rmSync(configDir, { recursive: true, force: true }));
-if (fs.existsSync(xrayBin)) {
+if (xrayBin) {
   const tmpCfgPath = path.join(configDir, 'test-verify-config.json');
   for (const node of [vlessNode, vmessNode, vlessFlowNoneNode, savedFlowNoneNode, ...visionNodes]) {
     const cfg = generateXrayConfig(node, { socksPort: 10808, httpPort: 10809 });
     fs.writeFileSync(tmpCfgPath, JSON.stringify(cfg, null, 2), 'utf-8');
-    const out = execFileSync(xrayBin, ['run', '-test', '-c', tmpCfgPath], {
-      encoding: 'utf-8',
-    });
+    const out = validateWithXray(tmpCfgPath)!;
     assert.ok(out.includes('Configuration OK'), `Xray config test failed: ${out}`);
-    console.log(`[PASS] xray.exe run -test validated ${node.protocol.toUpperCase()} config`);
+    console.log(`[PASS] Xray run -test validated ${node.protocol.toUpperCase()} config`);
   }
   fs.rmSync(tmpCfgPath, { force: true });
 } else {
-  console.log('[INFO] xray.exe not yet downloaded, skipping native binary config check');
+  console.log('[INFO] A native Xray executable is unavailable; skipping native config checks');
 }
 
 // 5. World map geometry (shared with the browser UI)
@@ -141,12 +154,12 @@ if (fs.existsSync(xrayBin)) {
   console.log('[PASS] VMess edit + share-link round-trip');
 
   // Edited node still produces a config Xray accepts.
-  if (fs.existsSync(xrayBin)) {
+  if (xrayBin) {
     const tmp = path.join(configDir, 'test-edit-config.json');
     fs.writeFileSync(tmp, JSON.stringify(generateXrayConfig(edited, {})), 'utf-8');
-    assert.ok(execFileSync(xrayBin, ['run', '-test', '-c', tmp], { encoding: 'utf-8' }).includes('Configuration OK'));
+    assert.ok(validateWithXray(tmp)!.includes('Configuration OK'));
     fs.rmSync(tmp, { force: true });
-    console.log('[PASS] xray.exe accepts edited config');
+    console.log('[PASS] Xray accepts edited config');
   }
 
   // Validation rejects bad input with readable messages.
@@ -165,10 +178,10 @@ if (fs.existsSync(xrayBin)) {
   assert.ok(insecureJson.includes('pinnedPeerCertSha256'));
   assert.ok(!JSON.stringify(generateXrayConfig(vlessNode, { pinnedCertSha256: 'ab'.repeat(32) })).includes('pinnedPeerCertSha256'), 'pin only applies when allow-insecure is on');
   assert.ok(!JSON.stringify(generateXrayConfig(vlessNode, { allowInsecureDefault: true })).includes('allowInsecure'));
-  if (fs.existsSync(xrayBin)) {
+  if (xrayBin) {
     const tmp = path.join(configDir, 'test-insecure-config.json');
     fs.writeFileSync(tmp, insecureJson, 'utf-8');
-    assert.ok(execFileSync(xrayBin, ['run', '-test', '-c', tmp], { encoding: 'utf-8' }).includes('Configuration OK'));
+    assert.ok(validateWithXray(tmp)!.includes('Configuration OK'));
     fs.rmSync(tmp, { force: true });
   }
   // Regression: TUN mode DNS hijack + fast HTTP CONNECT (sniffing off on http-in) + optional Mux must pass Xray validation.
@@ -177,13 +190,13 @@ if (fs.existsSync(xrayBin)) {
   assert.ok(tunJson.includes('dns-out'), 'TUN config must hijack port 53 to dns-out');
   assert.ok(!tunJson.includes('xudpConcurrency'), 'Mux must be off by default');
   assert.equal((tunCfg.inbounds as any[])[1].sniffing.enabled, false, 'http-in must disable sniffing for zero-delay CONNECT');
-  if (fs.existsSync(xrayBin)) {
+  if (xrayBin) {
     const tmp = path.join(configDir, 'test-tun-mux-config.json');
     fs.writeFileSync(tmp, tunJson, 'utf-8');
-    assert.ok(execFileSync(xrayBin, ['run', '-test', '-c', tmp], { encoding: 'utf-8' }).includes('Configuration OK'));
+    assert.ok(validateWithXray(tmp)!.includes('Configuration OK'));
     fs.rmSync(tmp, { force: true });
   }
-  console.log('[PASS] TUN DNS hijack + zero-delay HTTP CONNECT config validated by xray.exe');
+  console.log(`[PASS] TUN DNS hijack + zero-delay HTTP CONNECT config${xrayBin ? ' validated by Xray' : ' generated'}`);
 }
 
 // 6. World map geometry (shared with the browser UI)
@@ -385,13 +398,11 @@ const geoMath = await import('../public/assets/js/geo-math.js');
     accessLogPath: sampleAccessLog,
   });
   const tmpAdblockCfg = path.join(configDir, 'test-adblock-verify.json');
-  fs.writeFileSync(tmpAdblockCfg, JSON.stringify(adblockConfig, null, 2));
-  const testOut = execFileSync(xrayBin, ['run', '-test', '-c', tmpAdblockCfg], {
-    cwd: path.dirname(xrayBin),
-    encoding: 'utf-8',
-  });
-  assert.ok(testOut.includes('Configuration OK'));
-  fs.unlinkSync(tmpAdblockCfg);
+  if (xrayBin) {
+    fs.writeFileSync(tmpAdblockCfg, JSON.stringify(adblockConfig, null, 2));
+    assert.ok(validateWithXray(tmpAdblockCfg)!.includes('Configuration OK'));
+    fs.unlinkSync(tmpAdblockCfg);
+  }
 
   // Verify AdBlockLogWatcher parses Xray access log lines and categorizes YouTube ads, trackers & malware
   fs.writeFileSync(
@@ -416,10 +427,10 @@ const geoMath = await import('../public/assets/js/geo-math.js');
   assert.equal(abState.byCategory.malware.blocked, 1);
   assert.equal(abState.byCategory.custom.blocked, 1);
   assert.ok(abState.savedBytes > 150000);
-  console.log('[PASS] Brave-Style Ad, Tracker & YouTube Ad Shield Engine validated with xray.exe');
+  console.log(`[PASS] Brave-Style Ad, Tracker & YouTube Ad Shield Engine${xrayBin ? ' validated with Xray' : ''}`);
 }
 
-// 10. Smart Split Tunneling Engine (Bypass VPN vs VPN-Only Routing + Route Simulator + xray.exe validation)
+// 10. Smart Split Tunneling Engine (Bypass VPN vs VPN-Only Routing + Route Simulator + Xray validation)
 {
   const {
     ensureSplitTunnelConfig,
@@ -475,7 +486,7 @@ const geoMath = await import('../public/assets/js/geo-math.js');
   const v6 = evaluateSplitTunnelRoute('combank.lk', vpnOnlyCfg, null, true);
   assert.equal(v6.outbound, 'direct');
 
-  if (fs.existsSync(xrayBin)) {
+  if (xrayBin) {
     for (const stModeCfg of [bypassCfg, vpnOnlyCfg]) {
       const xrayCfg = generateXrayConfig(vlessNode, {
         tunMode: true,
@@ -483,15 +494,12 @@ const geoMath = await import('../public/assets/js/geo-math.js');
       });
       const tmpSplitCfg = path.join(configDir, 'test-split-verify.json');
       fs.writeFileSync(tmpSplitCfg, JSON.stringify(xrayCfg, null, 2));
-      const out = execFileSync(xrayBin, ['run', '-test', '-c', tmpSplitCfg], {
-        cwd: path.dirname(xrayBin),
-        encoding: 'utf-8',
-      });
+      const out = validateWithXray(tmpSplitCfg)!;
       assert.ok(out.includes('Configuration OK'));
       fs.unlinkSync(tmpSplitCfg);
     }
   }
-  console.log('[PASS] Smart Split Tunneling Engine (Bypass & VPN-Only modes) validated with xray.exe');
+  console.log(`[PASS] Smart Split Tunneling Engine (Bypass & VPN-Only modes)${xrayBin ? ' validated with Xray' : ''}`);
 }
 
 console.log('--- All Verification Checks Passed! ---');

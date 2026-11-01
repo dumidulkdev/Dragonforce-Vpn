@@ -71,6 +71,7 @@ async function virtualProcesses(moduleName: 'tunManager' | 'xrayRunner') {
   const sourcePath = path.resolve(`src/main/${moduleName}.ts`);
   const context = vm.createContext({
     Buffer, URL, AbortController,
+    process: { platform: 'win32', env: {} },
     setTimeout: (callback: any, ms: number) => setTimeout(callback, Math.min(ms, 5)),
     clearTimeout,
   });
@@ -79,6 +80,13 @@ async function virtualProcesses(moduleName: 'tunManager' | 'xrayRunner') {
     const values = name === 'node:fs'
       ? { default: { existsSync: () => true, mkdirSync() {}, writeFileSync() {} } }
       : name === 'node:child_process' ? { spawn: fakeSpawn, execFile: fakeExec }
+      : name === './binaries.ts' ? {
+        nativeBinaryNames: () => ({ xray: 'xray.exe', tun2socks: 'tun2socks.exe', wintun: 'wintun.dll' }),
+        resolveNativeBinaries: () => ({
+          xrayPath: path.resolve('virtual/bin/xray.exe'), tun2socksPath: null, wintunPath: null,
+          geoipPath: null, geositePath: null, xrayAssetDir: null,
+        }),
+      }
       : await import(name.startsWith('node:') ? name : new URL(name, pathToFileURL(sourcePath)).href);
     return new vm.SyntheticModule(Object.keys(values), function () {
       for (const [key, value] of Object.entries(values)) this.setExport(key, value);

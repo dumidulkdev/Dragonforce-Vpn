@@ -13,8 +13,12 @@ import { generateXrayConfig } from '../src/main/xrayConfig.ts';
 import { defaultAdBlockConfig } from '../src/main/adblockEngine.ts';
 import { ensureSplitTunnelConfig, evaluateSplitTunnelRoute } from '../src/main/splitTunnelEngine.ts';
 import { verifyAdBlock } from '../src/main/adblockVerification.ts';
+import { resolveNativeBinaries } from '../src/main/binaries.ts';
 
-const xray = path.resolve(process.env.VPN_BIN_DIR || 'resources/bin', 'xray.exe');
+const nativeBinaries = resolveNativeBinaries({
+  bundledBinDir: path.resolve(process.env.VPN_BIN_DIR || 'resources/bin'),
+});
+const xray = nativeBinaries.xrayPath;
 const node = parseShareLink('vless://b831381d-6324-4d53-ad4f-8cda48b30811@test.invalid:443?security=tls');
 
 async function listen(server: net.Server): Promise<number> {
@@ -47,7 +51,8 @@ async function readRoute(port: number, host: string): Promise<string> {
 }
 
 for (const mode of ['off', 'bypass', 'vpn_only'] as const) {
-  await test(`native Xray: Shield whitelist preserves ${mode} routes, including nested suffixes`, { skip: !fs.existsSync(xray) }, async () => {
+  await test(`native Xray: Shield whitelist preserves ${mode} routes, including nested suffixes`, { skip: !xray }, async () => {
+    assert.ok(xray);
     const root = process.platform === 'win32' ? path.join(process.env.LOCALAPPDATA!, 'Temp', 'opencode') : os.tmpdir();
     fs.mkdirSync(root, { recursive: true });
     const temp = fs.mkdtempSync(path.join(root, 'vpn-routing-'));
@@ -77,7 +82,10 @@ for (const mode of ['off', 'bypass', 'vpn_only'] as const) {
       : outbound);
     const file = path.join(temp, 'config.json');
     fs.writeFileSync(file, JSON.stringify(config));
-    const proc = spawn(xray, ['run', '-c', file], { cwd: path.dirname(xray), windowsHide: true });
+    const assetEnv = nativeBinaries.xrayAssetDir
+      ? { ...process.env, XRAY_LOCATION_ASSET: nativeBinaries.xrayAssetDir }
+      : undefined;
+    const proc = spawn(xray, ['run', '-c', file], { cwd: path.dirname(xray), env: assetEnv, windowsHide: true });
     let output = '';
     proc.stdout.on('data', chunk => { output += chunk; });
     proc.stderr.on('data', chunk => { output += chunk; });
