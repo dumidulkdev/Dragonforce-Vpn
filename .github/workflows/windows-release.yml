@@ -1,0 +1,99 @@
+name: Windows Release
+run-name: Release ${{ github.ref_name }}
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, verify, and publish Windows downloads
+    runs-on: windows-2022
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      VPN_BIN_DIR: ${{ github.workspace }}/resources/native/x64
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Validate the tag and prepare release notes
+        run: node scripts/release-notes.mjs "$env:RELEASE_TAG" "$env:RUNNER_TEMP/release-notes.md"
+      - name: Install dependencies
+        run: npm.cmd ci
+      - name: Prepare verified native engines
+        run: npm.cmd run setup:release-bins
+      - name: Test and build all Windows architectures
+        run: npm.cmd run release:win
+      - name: Verify installer payloads and generate checksums
+        run: npm.cmd run release:verify
+      - name: Smoke-test the x64 portable application
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          node scripts/smoke-desktop.mjs "release/DragonForce-VPN-$version-x64-Portable.exe"
+      - name: Smoke-test the x86 portable application
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          node scripts/smoke-desktop.mjs "release/DragonForce-VPN-$version-ia32-Portable.exe"
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = $env:RELEASE_TAG
+          $notes = "$env:RUNNER_TEMP/release-notes.md"
+          $assets = @(
+            "release/DragonForce-VPN-$version-Setup.exe",
+            "release/DragonForce-VPN-$version-x64-Portable.exe",
+            "release/DragonForce-VPN-$version-arm64-Portable.exe",
+            "release/DragonForce-VPN-$version-ia32-Portable.exe",
+            'release/SHA256SUMS.txt',
+            'release/BUILD-INFO.json',
+            'release/README.txt'
+          )
+          foreach ($asset in $assets) {
+            if (!(Test-Path -LiteralPath $asset -PathType Leaf)) { throw "Missing release asset: $asset" }
+          }
+          $isDraft = gh release view $tag --json isDraft --jq '.isDraft' 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if ($isDraft -ne 'true') { throw "Release $tag is already published. Publish changes under a new version." }
+          } else {
+            gh release create $tag --verify-tag --draft --title "DragonForce VPN $tag" --notes-file $notes
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create the release draft.' }
+          }
+          gh release upload $tag @assets --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed; the release remains a draft.' }
+          $remoteJson = gh release view $tag --json assets
+          if ($LASTEXITCODE -ne 0) { throw 'Could not verify the uploaded assets.' }
+          $remote = $remoteJson | ConvertFrom-Json
+          foreach ($asset in $assets) {
+            $file = Get-Item -LiteralPath $asset
+            $uploaded = @($remote.assets | Where-Object { $_.name -eq $file.Name })
+            if ($uploaded.Count -ne 1 -or $uploaded[0].size -ne $file.Length) {
+              throw "Uploaded asset is missing or incomplete: $($file.Name)"
+            }
+          }
+          $prerelease = $version.Contains('-').ToString().ToLowerInvariant()
+          $latest = (!$version.Contains('-')).ToString().ToLowerInvariant()
+          gh release edit $tag --draft=false "--prerelease=$prerelease" "--latest=$latest" --title "DragonForce VPN $tag" --notes-file $notes
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish the completed release.' }

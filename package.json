@@ -1,0 +1,51 @@
+{
+  "name": "dragonforce-vpn",
+  "productName": "DragonForce VPN",
+  "version": "2.4.1",
+  "type": "module",
+  "description": "DragonForce Vpn — Modern Windows VPN Client powered by Xray-core supporting VLESS, VMess, TLS, Subscriptions, Ad Shield, Smart Split Tunneling, and Wintun TUN Mode",
+  "author": "DragonForce",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dumidulkdev/Dragonforce-Vpn.git"
+  },
+  "homepage": "https://github.com/dumidulkdev/Dragonforce-Vpn#readme",
+  "bugs": {
+    "url": "https://github.com/dumidulkdev/Dragonforce-Vpn/issues"
+  },
+  "main": "dist-electron/desktop.cjs",
+  "scripts": {
+    "setup:bins": "node scripts/download-binaries.mjs",
+    "setup:release-bins": "node scripts/prepare-native.mjs",
+    "build:electron": "node scripts/build-electron.mjs",
+    "dev:vite": "vite",
+    "build:vite": "vite build",
+    "build": "npm run build:electron && npm run build:vite",
+    "start": "npm run build && electron .",
+    "release:prepare": "npm run setup:release-bins && node scripts/generate-icon.mjs && npm run build:electron",
+    "release:win": "npm run typecheck && npm test && npm run release:prepare && electron-builder --config electron-builder.config.cjs --win --publish never",
+    "release:verify": "node scripts/verify-release.mjs",
+    "release:smoke": "node scripts/smoke-desktop.mjs",
+    "release:notes": "node scripts/release-notes.mjs",
+    "version": "node scripts/sync-version.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit",
+    "test:unit": "node --experimental-strip-types --experimental-vm-modules --test \"tests/*.mts\""
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "33.4.11",
+    "electron-builder": "26.18.1",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
+}

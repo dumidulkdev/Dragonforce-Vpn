@@ -1,0 +1,27 @@
+# Dependencies and generated builds
+node_modules/
+/dist/
+/dist-electron/
+/release/
+/.release-cache/
+/build/icon.ico
+*.tsbuildinfo
+/coverage/
+
+# Downloaded native engines and archives
+/resources/bin/
+/resources/native/
+/resources/tmp/
+
+# Local VPN profiles, credentials, and logs
+/data/
+.env
+.env.*
+!.env.example
+*.log
+
+# Local editor and operating-system files
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini

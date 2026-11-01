@@ -1,0 +1,39 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck, tests, and build
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      VPN_BIN_DIR: ${{ github.workspace }}/resources/native/x64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm.cmd ci
+      - name: Prepare verified x64 test engines
+        run: npm.cmd run setup:release-bins -- x64
+      - name: Typecheck
+        run: npm.cmd run typecheck
+      - name: Run tests with the native engine
+        run: npm.cmd test
+      - name: Build the application
+        run: npm.cmd run build

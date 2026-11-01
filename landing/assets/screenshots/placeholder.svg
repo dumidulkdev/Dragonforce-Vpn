@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900" role="img" aria-label="Screenshot placeholder">
+  <rect width="1400" height="900" fill="#F1F4F6"/>
+  <rect x="48" y="48" width="1304" height="804" rx="16" fill="#FFFFFF" stroke="#D3DCE1" stroke-width="2"/>
+  <rect x="48" y="48" width="1304" height="52" rx="16" fill="#E9EEF1"/>
+  <rect x="72" y="64" width="12" height="12" rx="6" fill="#D3DCE1"/>
+  <rect x="92" y="64" width="12" height="12" rx="6" fill="#D3DCE1"/>
+  <rect x="112" y="64" width="12" height="12" rx="6" fill="#D3DCE1"/>
+  <rect x="72" y="132" width="72" height="756" fill="#F1F4F6"/>
+  <rect x="168" y="132" width="1160" height="120" rx="12" fill="#E7F6F4" stroke="#00A896" stroke-width="2"/>
+  <rect x="168" y="276" width="1160" height="420" rx="12" fill="#EEF2F5" stroke="#E4EAED" stroke-width="2"/>
+  <text x="700" y="470" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="28" fill="#8794A0">App screenshot</text>
+  <text x="700" y="510" text-anchor="middle" font-family="Segoe UI, system-ui, sans-serif" font-size="18" fill="#A3AFB9">Replace with hero-dashboard.webp</text>
+</svg>

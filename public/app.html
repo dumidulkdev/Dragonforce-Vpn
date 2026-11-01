@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>DragonForce Vpn</title>
+    <link rel="icon" type="image/png" href="/assets/logo.png" />
+    <link rel="preload" href="/assets/logo.png" as="image" />
+    <link rel="preload" href="/assets/fonts/Poppins-Regular.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/assets/fonts/Poppins-SemiBold.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="stylesheet" href="/assets/css/app.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <nav class="rail" id="rail" aria-label="Main"></nav>
+      <main>
+        <section class="view" id="view-dashboard"></section>
+        <section class="view view-scroll" id="view-shield" hidden></section>
+        <section class="view view-scroll" id="view-split" hidden></section>
+        <section class="view view-scroll" id="view-usage" hidden></section>
+        <section class="view view-scroll" id="view-speed" hidden></section>
+        <section class="view view-scroll" id="view-servers" hidden></section>
+        <section class="view view-scroll" id="view-subscriptions" hidden></section>
+        <section class="view view-scroll" id="view-logs" hidden></section>
+        <section class="view view-scroll" id="view-settings" hidden></section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div id="modal-root"></div>
+    <script type="module" src="/assets/js/app.js"></script>
+  </body>
+</html>
