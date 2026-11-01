@@ -4,6 +4,7 @@ run-name: Release ${{ github.ref_name }}
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -36,7 +37,9 @@ jobs:
           node-version: '22'
           cache: npm
       - name: Validate the tag and prepare release notes
-        run: node scripts/release-notes.mjs "$env:RELEASE_TAG" "$env:RUNNER_TEMP/release-notes.md"
+        run: |
+          if ($env:GITHUB_REF_TYPE -ne 'tag') { throw 'Select a version tag, such as v2.4.1, to publish a release.' }
+          node scripts/release-notes.mjs "$env:RELEASE_TAG" "$env:RUNNER_TEMP/release-notes.md"
       - name: Install dependencies
         run: npm.cmd ci
       - name: Prepare verified native engines

@@ -378,10 +378,11 @@ const geoMath = await import('../public/assets/js/geo-math.js');
   abState.config.customBlockedDomains.push('promo.badsite.example');
   abState.config.whitelistedDomains.push('allowed.partner.example');
 
+  const sampleAccessLog = path.join(configDir, 'verify-access.log');
   const adblockConfig = generateXrayConfig(vlessNode, {
     tunMode: true,
     adblock: abState.config,
-    accessLogPath: path.resolve('data', 'verify-access.log'),
+    accessLogPath: sampleAccessLog,
   });
   const tmpAdblockCfg = path.join(configDir, 'test-adblock-verify.json');
   fs.writeFileSync(tmpAdblockCfg, JSON.stringify(adblockConfig, null, 2));
@@ -393,7 +394,6 @@ const geoMath = await import('../public/assets/js/geo-math.js');
   fs.unlinkSync(tmpAdblockCfg);
 
   // Verify AdBlockLogWatcher parses Xray access log lines and categorizes YouTube ads, trackers & malware
-  const sampleAccessLog = path.resolve('data', 'verify-access.log');
   fs.writeFileSync(
     sampleAccessLog,
     [

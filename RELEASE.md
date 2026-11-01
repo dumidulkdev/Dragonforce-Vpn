@@ -109,6 +109,8 @@ Two workflows run on GitHub-hosted Windows machines:
 
 The release workflow uses GitHub's built-in `GITHUB_TOKEN`. It creates a draft while uploading and publishes only after all files are present. A failed run can be retried from **Actions**; an already published version must be followed by a new version.
 
+To start a release manually for an existing version tag, use `gh workflow run windows-release.yml --ref v2.4.1`. Manual runs must target a tag whose version matches the source.
+
 For the next bug-fix release:
 
 ```powershell
