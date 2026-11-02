@@ -22,8 +22,9 @@ let controllerOutput = '';
 app.setName('DragonForce VPN');
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.dragonforce.vpn');
-} else if (process.platform === 'linux' && typeof app.setDesktopName === 'function') {
-  app.setDesktopName('dragonforce-vpn.desktop');
+} else if (process.platform === 'linux') {
+  const linuxApp = app as typeof app & { setDesktopName?: (name: string) => void };
+  if (typeof linuxApp.setDesktopName === 'function') linuxApp.setDesktopName('dragonforce-vpn.desktop');
 }
 
 function log(message: string) {

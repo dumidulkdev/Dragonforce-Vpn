@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+  "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>DragonForce</vendor>
+  <vendor_url>https://github.com/dumidulkdev/Dragonforce-Vpn</vendor_url>
+  <action id="com.dragonforce.vpn.network.manage">
+    <description>Configure DragonForce VPN network routing</description>
+    <message>Authentication is required to configure the DragonForce VPN TUN interface and routes</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/dragonforce-vpn/dragonforce-net-helper</annotate>
+  </action>
+</policyconfig>

@@ -337,12 +337,30 @@ await test('standalone: Linux connects in local proxy mode without changing OS p
   const tun = await b.call('routing-mode', { mode: 'tun' });
   assert.equal(tun.ok, false);
   assert.equal(tun.httpStatus, 501);
-  assert.match(tun.error, /not available on Linux/);
+  assert.match(tun.error, /network helper to be installed/);
 
   await b.call('disconnect');
   state = await b.state();
   assert.equal(state.status.connected, false);
   assert.ok(state.logs.some((entry: any) => entry.message.includes('No Linux desktop-wide proxy settings were changed')));
+});
+
+await test('standalone: Linux TUN uses polkit capability state and restores before disconnect', async () => {
+  const b = await backend('standalone', { ...seed(), routingMode: 'tun' }, { platform: 'linux', linuxTunAvailable: true });
+  const connected = await b.call('connect');
+  assert.equal(connected.ok, true);
+  let state = await b.state();
+  assert.equal(state.status.connected, true);
+  assert.equal(state.status.tunActive, true);
+  assert.equal(state.status.tunState, 'active');
+  assert.equal(state.status.tunProtection.ipv4, true);
+  assert.equal(state.status.tunProtection.ipv6, 'blocked');
+  assert.equal(state.status.isAdmin, false, 'Linux TUN uses polkit without elevating the controller');
+  await b.call('disconnect');
+  state = await b.state();
+  assert.equal(state.status.connected, false);
+  assert.equal(state.status.tunActive, false);
+  assert.equal(state.status.tunState, 'idle');
 });
 
 await test('standalone: Linux elevation reports the pending polkit implementation', async () => {

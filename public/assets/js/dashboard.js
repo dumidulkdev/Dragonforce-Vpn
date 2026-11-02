@@ -289,7 +289,7 @@ export function createDashboard(root, actions) {
           ['pin', 'Location', node.geo ? `${flagHtml(node.geo.countryCode, 18)}<span>${escapeHtml(locationLabel(node.geo))}</span>` : '<span class="muted">Locating…</span>'],
           ['server', 'Server', `<span class="mono" title="${escapeHtml(node.address)}:${node.port}">${escapeHtml(node.address)}:${node.port}</span>`],
           ['layers', 'Protocol', `<span>${protocolText(node)}</span>`],
-          ['route', 'Routing', `<span>${st.routingMode === 'tun' ? 'Full TUN' : 'System proxy'}</span>`],
+          ['route', 'Routing', `<span>${st.tunActive ? (st.platform === 'linux' ? 'Linux IPv4 TUN' : 'Full TUN') : st.routingMode === 'tun' ? 'TUN selected · inactive' : st.platform === 'linux' ? 'Local proxy' : 'System proxy'}</span>`],
           ['network', 'Exit IP', exitText],
           [
             'gauge',

@@ -93,6 +93,7 @@ export interface LogEntry {
 }
 
 export interface VpnStatus {
+  platform: 'win32' | 'linux' | 'other';
   connected: boolean;
   connecting: boolean;
   activeServerId: string | null;
@@ -109,6 +110,16 @@ export interface VpnStatus {
     xray: boolean;
     tun2socks: boolean;
     wintun: boolean;
+  };
+  tunCapability: {
+    available: boolean;
+    privilegeMode: 'administrator' | 'polkit' | 'unsupported';
+    reason: string | null;
+  };
+  tunState: 'idle' | 'preparing' | 'active' | 'restoring' | 'error';
+  tunProtection: {
+    ipv4: boolean;
+    ipv6: 'captured' | 'blocked' | 'refused' | 'none';
   };
   stats: TrafficStats;
   /** Public exit IP + location observed through the tunnel (null when unknown). */

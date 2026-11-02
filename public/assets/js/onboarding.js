@@ -356,7 +356,9 @@ function renderStepShowcase(stepIdx) {
 export function openOnboardingModal({ store, api, onComplete, onOpenQrScanner }) {
   const root = document.getElementById('modal-root');
   let stepIdx = 0;
-  let chosenMode = store.status?.routingMode || store.data?.routingMode || (store.status?.isAdmin ? 'tun' : 'system_proxy');
+  const linux = store.status?.platform === 'linux';
+  const tunReady = linux ? store.status?.tunCapability?.available : store.status?.isAdmin;
+  let chosenMode = store.status?.routingMode || store.data?.routingMode || (tunReady ? 'tun' : 'system_proxy');
 
   async function finishOnboarding(nextAction) {
     try {
@@ -437,9 +439,9 @@ export function openOnboardingModal({ store, api, onComplete, onOpenQrScanner })
           </div>
 
           <div class="ob-left-foot">
-            <span class="ob-admin-pill ${isAdmin ? 'is-admin' : ''}">
-              ${icon(isAdmin ? 'shieldCheck' : 'shield', 14)}
-              <span>${isAdmin ? 'Administrator · Wintun L3 Ready' : 'Standard Mode · System Proxy Ready'}</span>
+            <span class="ob-admin-pill ${tunReady ? 'is-admin' : ''}">
+              ${icon(tunReady ? 'shieldCheck' : 'shield', 14)}
+              <span>${linux ? (tunReady ? 'Linux TUN · Polkit Ready' : 'Linux · Local Proxy Ready') : (isAdmin ? 'Administrator · Wintun L3 Ready' : 'Standard Mode · System Proxy Ready')}</span>
             </span>
           </div>
         </div>
@@ -469,18 +471,18 @@ export function openOnboardingModal({ store, api, onComplete, onOpenQrScanner })
           <div class="ob-mode-picker">
             <span class="ob-mode-label">Preferred Default Routing Mode</span>
             <div class="ob-mode-grid">
-              <button type="button" class="ob-mode-btn ${chosenMode === 'tun' ? 'is-selected' : ''}" data-act="pick-mode" data-mode="tun">
+              <button type="button" class="ob-mode-btn ${chosenMode === 'tun' ? 'is-selected' : ''}" data-act="pick-mode" data-mode="tun" ${linux && !tunReady ? 'disabled' : ''}>
                 <div class="ob-mode-ic">${icon('terminal', 15)}</div>
                 <div class="ob-mode-txt">
-                  <strong>Full TUN + Hybrid Proxy</strong>
-                  <span>Routes all apps, browsers & CLI</span>
+                  <strong>${linux ? 'Linux IPv4 TUN' : 'Full TUN + Hybrid Proxy'}</strong>
+                  <span>${linux ? 'Polkit authorization · IPv6 default refused' : 'Routes all apps, browsers & CLI'}</span>
                 </div>
               </button>
               <button type="button" class="ob-mode-btn ${chosenMode === 'system_proxy' ? 'is-selected' : ''}" data-act="pick-mode" data-mode="system_proxy">
                 <div class="ob-mode-ic">${icon('globe', 15)}</div>
                 <div class="ob-mode-txt">
-                  <strong>System Proxy Only</strong>
-                  <span>Browsers & proxy-aware apps</span>
+                  <strong>${linux ? 'Local Proxy Only' : 'System Proxy Only'}</strong>
+                  <span>${linux ? 'Manual browser & terminal configuration' : 'Browsers & proxy-aware apps'}</span>
                 </div>
               </button>
             </div>

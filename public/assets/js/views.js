@@ -134,7 +134,7 @@ export function renderSpeed(root, store) {
           </span>
           <span class="speed-pill">
             ${icon('zap', 14)}
-            ${st?.routingMode === 'tun' ? 'Hybrid TUN + Direct HTTP CONNECT active' : 'Direct HTTP CONNECT active'}
+            ${st?.tunActive ? (st.platform === 'linux' ? 'Linux IPv4 TUN active' : 'Hybrid TUN + Direct HTTP CONNECT active') : 'Direct HTTP CONNECT active'}
           </span>
         </div>
         <div class="speed-status-text num">
@@ -1495,6 +1495,8 @@ export function openSubscriptionModal({ subId, store, api, actions }) {
 export function renderSettings(root, store) {
   const st = store.status;
   const d = store.data;
+  const linux = st.platform === 'linux';
+  const tunAvailable = Boolean(st.tunCapability?.available);
   const isDark = (d.theme || document.documentElement.dataset.theme || 'light') === 'dark';
   const cmds = store.terminalCommands || {};
   const sw = (act, on, label) => `<button class="switch" role="switch" aria-checked="${on}" aria-label="${label}" data-act="${act}"></button>`;
@@ -1531,17 +1533,21 @@ export function renderSettings(root, store) {
     <section class="panel section">
       <div class="section-title">Traffic routing</div>
       <div class="setting">
-        <div class="setting-text"><strong>Routing mode</strong><span>System proxy covers browsers and most apps. Full TUN creates a virtual adapter so every app — including terminal tools — uses the tunnel.</span></div>
+        <div class="setting-text"><strong>Routing mode</strong><span>${linux ? 'Local proxy exposes loopback HTTP/SOCKS ports. Linux TUN captures IPv4 device traffic after polkit authorization and refuses dual-stack hosts until IPv6 protection is implemented.' : 'System proxy covers browsers and most apps. Full TUN creates a virtual adapter so every app — including terminal tools — uses the tunnel.'}</span></div>
         <div class="segmented" role="group" aria-label="Routing mode">
-          <button data-act="mode" data-mode="system_proxy" aria-pressed="${st.routingMode === 'system_proxy'}">${icon('globe', 15)}System proxy</button>
-          <button data-act="mode" data-mode="tun" aria-pressed="${st.routingMode === 'tun'}">${icon('terminal', 15)}Full TUN</button>
+          <button data-act="mode" data-mode="system_proxy" aria-pressed="${st.routingMode === 'system_proxy'}">${icon('globe', 15)}${linux ? 'Local proxy' : 'System proxy'}</button>
+          <button data-act="mode" data-mode="tun" aria-pressed="${st.routingMode === 'tun'}" ${linux && !tunAvailable ? 'disabled' : ''} title="${linux && !tunAvailable ? escapeHtml(st.tunCapability?.reason || 'Linux TUN unavailable') : ''}">${icon('terminal', 15)}${linux ? 'Linux TUN' : 'Full TUN'}</button>
         </div>
       </div>
       <div class="setting">
-        <div class="setting-text"><strong>Administrator access</strong><span>Full TUN mode needs administrator rights to create the Wintun adapter and routes.</span></div>
-        ${st.isAdmin
-          ? `<div class="notice notice-ok">${icon('shieldCheck', 16)}Running as administrator</div>`
-          : `<button class="btn" data-act="elevate">${icon('shield', 16)}Restart as administrator</button>`}
+        <div class="setting-text"><strong>${linux ? 'Linux network helper' : 'Administrator access'}</strong><span>${linux ? 'The root-owned package helper requests polkit authorization only while creating and restoring the TUN interface and routes.' : 'Full TUN mode needs administrator rights to create the Wintun adapter and routes.'}</span></div>
+        ${linux
+          ? (tunAvailable
+            ? `<div class="notice notice-ok">${icon('shieldCheck', 16)}Installed · polkit authorization requested on connect</div>`
+            : `<div class="notice notice-warn">${icon('alert', 16)}${escapeHtml(st.tunCapability?.reason || 'Linux TUN unavailable')}</div>`)
+          : (st.isAdmin
+            ? `<div class="notice notice-ok">${icon('shieldCheck', 16)}Running as administrator</div>`
+            : `<button class="btn" data-act="elevate">${icon('shield', 16)}Restart as administrator</button>`)}
       </div>
       <div class="setting">
         <div class="setting-text"><strong>Terminal proxy variables</strong><span>Sets HTTP_PROXY, HTTPS_PROXY and ALL_PROXY for your user so new terminals route npm, git, pip and curl through the tunnel without TUN.</span></div>

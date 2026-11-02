@@ -5,6 +5,13 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { promisify } from 'node:util';
 import { stopChildProcess } from './childProcess.ts';
+import { resolveNativeBinaries } from './binaries.ts';
+import {
+  getLinuxTunCapability,
+  IP_PATH,
+  LINUX_TUN_NAME,
+  LinuxNetworkHelperClient,
+} from './linuxNetworkHelper.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -14,6 +21,7 @@ const TUN_MASK = '255.254.0.0';
 const TUN_IPV6 = 'fdfe:dcba:9876::1';
 
 export async function checkIsAdmin(): Promise<boolean> {
+  if (process.platform !== 'win32') return false;
   try {
     await execFileAsync('net.exe', ['session']);
     return true;
@@ -36,7 +44,32 @@ export interface PhysicalRouteInfo {
   interfaceIndex: string;
 }
 
-export async function detectPhysicalGateway(family: 4 | 6 = 4): Promise<PhysicalRouteInfo> {
+export async function detectPhysicalGateway(family: 4 | 6 = 4, endpoint?: string): Promise<PhysicalRouteInfo> {
+  if (process.platform === 'linux') {
+    if (family !== 4) throw new Error('Linux TUN MVP supports IPv4 VPN endpoints only');
+    const args = endpoint
+      ? ['-4', '-json', 'route', 'get', endpoint]
+      : ['-4', '-json', 'route', 'show', 'default'];
+    const { stdout } = await execFileAsync(IP_PATH, args, { windowsHide: true });
+    let routes: Array<{ gateway?: string; dev?: string; type?: string; metric?: number }>;
+    try { routes = JSON.parse(stdout); }
+    catch { throw new Error('Could not parse the Linux IPv4 route table'); }
+    const usable = routes
+      .filter(route => (!route.type || route.type === 'unicast') && net.isIPv4(route.gateway || '') &&
+        Boolean(route.dev) && route.dev !== LINUX_TUN_NAME)
+      .sort((a, b) => Number(a.metric || 0) - Number(b.metric || 0));
+    if (usable.length !== 1 && endpoint) throw new Error('The VPN endpoint must resolve to exactly one physical IPv4 route');
+    const route = usable[0];
+    if (!route?.gateway || !route.dev) throw new Error('Could not detect an IPv4 physical gateway and interface');
+    const { stdout: linkJson } = await execFileAsync(IP_PATH, ['-json', 'link', 'show', 'dev', route.dev], { windowsHide: true });
+    let links: Array<{ ifindex?: number }>;
+    try { links = JSON.parse(linkJson); }
+    catch { throw new Error('Could not parse the Linux physical interface'); }
+    const interfaceIndex = links[0]?.ifindex;
+    if (!Number.isInteger(interfaceIndex) || interfaceIndex! <= 0) throw new Error('Could not identify the Linux physical interface index');
+    return { gatewayIp: route.gateway, interfaceName: route.dev, interfaceIndex: String(interfaceIndex) };
+  }
+  if (process.platform !== 'win32') throw new Error(`TUN routing is not supported on ${process.platform}`);
   const defaultPrefix = family === 4 ? '0.0.0.0/0' : '::/0';
   const psScript = `
     $route = Get-NetRoute -DestinationPrefix '${defaultPrefix}' -ErrorAction SilentlyContinue |
@@ -120,6 +153,8 @@ export class TunManager {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private addedRoutes: Array<{ prefix: string; gateway: string; index: string }> = [];
   private configured = false;
+  private linuxHelper: LinuxNetworkHelperClient | null = null;
+  private linuxHelperFailure: string | null = null;
   private onLog: (level: 'info' | 'warn' | 'error', msg: string) => void;
   private onUnexpectedExit: (code: number | null) => void;
 
@@ -129,7 +164,8 @@ export class TunManager {
   }
 
   public isRunning(): boolean {
-    return this.proc !== null;
+    return this.proc !== null && (process.platform !== 'linux' ||
+      (this.configured && this.linuxHelper?.isRunning() === true && !this.linuxHelperFailure));
   }
 
   public async start(
@@ -144,7 +180,13 @@ export class TunManager {
     signal?.throwIfAborted();
 
     try {
-      await this.startNow(binDir, socksPort, serverAddress, preResolvedIps, physicalRoute, signal);
+      if (process.platform === 'win32') {
+        await this.startWindows(binDir, socksPort, serverAddress, preResolvedIps, physicalRoute, signal);
+      } else if (process.platform === 'linux') {
+        await this.startLinux(binDir, socksPort, serverAddress, preResolvedIps, physicalRoute, signal);
+      } else {
+        throw new Error(`TUN mode is not supported on ${process.platform}`);
+      }
     } catch (error) {
       try { await this.stop(); }
       catch (cleanupError) { throw new Error(`${String(error)}; ${String(cleanupError)}`); }
@@ -168,7 +210,7 @@ export class TunManager {
     else if (stdout.trim() !== 'existing') throw new Error(`Could not confirm route ${prefix}`);
   }
 
-  private async startNow(
+  private async startWindows(
     binDir: string,
     socksPort: number,
     serverAddress: string,
@@ -347,7 +389,140 @@ export class TunManager {
     );
   }
 
+  private async startLinux(
+    binDir: string,
+    socksPort: number,
+    serverAddress: string,
+    preResolvedIps?: string[],
+    physicalRoute?: PhysicalRouteInfo,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const capability = getLinuxTunCapability();
+    if (!capability.available) {
+      throw new Error(capability.reason || 'Linux TUN mode requires the DragonForce network helper to be installed by the package manager.');
+    }
+    const binaries = resolveNativeBinaries({ bundledBinDir: binDir });
+    if (!binaries.tun2socksPath) {
+      throw new Error('tun2socks was not found or is not executable. Configure DRAGONFORCE_TUN2SOCKS_PATH or install tun2socks.');
+    }
+    const resolved = preResolvedIps?.length ? preResolvedIps : await resolveServerAddresses(serverAddress);
+    const serverIps = resolved.filter(net.isIPv4);
+    if (!serverIps.length || serverIps.length !== resolved.length) {
+      throw new Error('Linux TUN MVP requires an IPv4 VPN server endpoint.');
+    }
+    const endpoint = serverIps[0];
+    const route = physicalRoute || await detectPhysicalGateway(4, endpoint);
+    if (!net.isIPv4(route.gatewayIp) || !interfacePattern(route.interfaceName)) {
+      throw new Error('Invalid Linux physical gateway or interface');
+    }
+    signal?.throwIfAborted();
+    await this.assertNoLinuxIpv6Default();
+    await this.waitForLocalSocks(socksPort, signal);
+
+    const helper = new LinuxNetworkHelperClient(
+      this.onLog,
+      code => {
+        this.linuxHelperFailure = `Linux network helper exited (${code ?? 'unknown'})`;
+        this.onUnexpectedExit(code);
+      }
+    );
+    this.linuxHelper = helper;
+    this.linuxHelperFailure = null;
+    await helper.start();
+    signal?.throwIfAborted();
+    const sessionId = helper.newSessionId();
+    await helper.prepare(sessionId, endpoint, route.gatewayIp, route.interfaceName);
+    signal?.throwIfAborted();
+
+    const args = [
+      '--device', LINUX_TUN_NAME,
+      '--proxy', `socks5://127.0.0.1:${socksPort}`,
+      '--interface', route.interfaceName,
+      '--tcp-auto-tuning',
+      '--tcp-sndbuf', '4m',
+      '--tcp-rcvbuf', '4m',
+      '--loglevel', 'warn',
+    ];
+    this.onLog('info', `Starting Linux tun2socks: ${args.join(' ')}`);
+    let lastErrorLine = '';
+    const proc = spawn(binaries.tun2socksPath, args, {
+      cwd: path.dirname(binaries.tun2socksPath),
+      windowsHide: true,
+    });
+    this.proc = proc;
+    proc.stdout.on('data', (chunk: Buffer) => {
+      for (const line of chunk.toString('utf-8').split(/\r?\n/).filter(Boolean)) this.onLog('info', line);
+    });
+    proc.stderr.on('data', (chunk: Buffer) => {
+      for (const line of chunk.toString('utf-8').split(/\r?\n/).filter(Boolean)) {
+        lastErrorLine = line;
+        this.onLog('warn', line);
+      }
+    });
+    proc.on('exit', code => {
+      if (this.proc === proc) {
+        this.proc = null;
+        this.configured = false;
+        this.onLog('warn', `tun2socks exited with code ${code ?? 0}`);
+        this.onUnexpectedExit(code);
+      }
+    });
+    proc.on('error', error => {
+      lastErrorLine = error.message;
+      if (this.proc === proc) {
+        this.proc = null;
+        this.configured = false;
+        this.onLog('error', `tun2socks process error: ${error.message}`);
+        this.onUnexpectedExit(null);
+      }
+    });
+    await new Promise(resolve => setTimeout(resolve, 700));
+    signal?.throwIfAborted();
+    if (this.proc !== proc || proc.killed) {
+      throw new Error(`tun2socks failed to initialize the Linux TUN device: ${lastErrorLine || 'process exited'}`);
+    }
+    await helper.activate();
+    signal?.throwIfAborted();
+    if (!helper.isRunning() || this.linuxHelperFailure) {
+      throw new Error(this.linuxHelperFailure || 'Linux network helper stopped during activation');
+    }
+    this.configured = true;
+    this.onLog('info', `Linux IPv4 TUN active (${LINUX_TUN_NAME}). IPv6-default hosts are refused to prevent leaks.`);
+  }
+
+  private async assertNoLinuxIpv6Default(): Promise<void> {
+    const { stdout } = await execFileAsync(IP_PATH, ['-6', '-json', 'route', 'show', 'default'], { windowsHide: true });
+    let routes: unknown[];
+    try { routes = JSON.parse(stdout); }
+    catch { throw new Error('Could not parse the Linux IPv6 route table'); }
+    if (routes.length > 0) {
+      throw new Error('Linux IPv4-only TUN mode was refused because an active IPv6 default route could leak traffic.');
+    }
+  }
+
+  private async waitForLocalSocks(port: number, signal?: AbortSignal, timeoutMs = 5000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      signal?.throwIfAborted();
+      const ready = await new Promise<boolean>(resolve => {
+        const socket = net.connect({ host: '127.0.0.1', port });
+        const finish = (value: boolean) => { socket.destroy(); resolve(value); };
+        socket.once('connect', () => finish(true));
+        socket.once('error', () => finish(false));
+        socket.setTimeout(300, () => finish(false));
+      });
+      if (ready) return;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    throw new Error(`Xray SOCKS5 inbound 127.0.0.1:${port} did not become ready`);
+  }
+
   public async stop(): Promise<void> {
+    if (process.platform === 'linux') return this.stopLinux();
+    return this.stopWindows();
+  }
+
+  private async stopWindows(): Promise<void> {
     const proc = this.proc;
     this.proc = null;
     const errors: unknown[] = [];
@@ -380,4 +555,50 @@ export class TunManager {
     }
     if (errors.length) throw new Error(`TUN cleanup failed: ${errors.map(String).join('; ')}`);
   }
+
+  private async stopLinux(): Promise<void> {
+    let helper = this.linuxHelper;
+    const proc = this.proc;
+    this.proc = null;
+    const errors: unknown[] = [];
+    if (proc) {
+      try { await stopChildProcess(proc); }
+      catch (error) {
+        if (proc.exitCode === null && proc.signalCode === null) this.proc = proc;
+        errors.push(error);
+      }
+    }
+    // Keep capture policy in place if tun2socks could not be stopped; removing
+    // it here would fail open to the physical default route.
+    if (errors.length) throw new Error(`Linux TUN cleanup failed: ${errors.map(String).join('; ')}`);
+    if (helper && !helper.isRunning()) {
+      const recovery = new LinuxNetworkHelperClient(this.onLog);
+      try {
+        // Startup reconciles the root-owned stale journal before reporting ready.
+        await recovery.start();
+        helper = recovery;
+        this.linuxHelper = recovery;
+      } catch (error) {
+        errors.push(new Error(`Could not restart the Linux network helper for cleanup: ${String(error)}`));
+      }
+    }
+    if (!helper?.isRunning() && this.configured && errors.length === 0) {
+      errors.push(new Error('Linux network helper exited before route cleanup; restart the connection to reconcile its journal.'));
+    }
+    if (helper?.isRunning()) {
+      try {
+        await helper.cleanup();
+        this.linuxHelper = null;
+        this.linuxHelperFailure = null;
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length === 0) this.configured = false;
+    if (errors.length) throw new Error(`Linux TUN cleanup failed: ${errors.map(String).join('; ')}`);
+  }
+}
+
+function interfacePattern(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_.-]{0,14}$/.test(value) && value !== LINUX_TUN_NAME;
 }

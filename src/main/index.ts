@@ -31,6 +31,7 @@ import type {
   SubscriptionItem,
 } from './types.ts';
 import { resolveNativeBinaries } from './binaries.ts';
+import { getLinuxTunCapability } from './linuxNetworkHelper.ts';
 
 const execFileAsync = promisify(execFile);
 
@@ -77,6 +78,7 @@ const defaultPersistedData: PersistedData = {
 let persistedData: PersistedData = { ...defaultPersistedData };
 
 let vpnStatus: VpnStatus = {
+  platform: process.platform === 'win32' || process.platform === 'linux' ? process.platform : 'other',
   connected: false,
   connecting: false,
   activeServerId: null,
@@ -94,6 +96,9 @@ let vpnStatus: VpnStatus = {
     tun2socks: false,
     wintun: false,
   },
+  tunCapability: { available: false, privilegeMode: 'unsupported', reason: 'TUN capability has not been checked.' },
+  tunState: 'idle',
+  tunProtection: { ipv4: false, ipv6: 'none' },
   stats: {
     upSpeed: 0,
     downSpeed: 0,
@@ -146,6 +151,23 @@ function checkBinaries() {
     tun2socks: Boolean(binaries.tun2socksPath),
     wintun: process.platform !== 'win32' || Boolean(binaries.wintunPath),
   };
+  if (process.platform === 'linux') {
+    const capability = getLinuxTunCapability();
+    vpnStatus.tunCapability = {
+      available: capability.available && Boolean(binaries.tun2socksPath),
+      privilegeMode: 'polkit',
+      reason: capability.reason || (binaries.tun2socksPath ? null : 'tun2socks is not installed or executable.'),
+    };
+  } else if (process.platform === 'win32') {
+    const available = vpnStatus.isAdmin && Boolean(binaries.tun2socksPath) && Boolean(binaries.wintunPath);
+    vpnStatus.tunCapability = {
+      available,
+      privilegeMode: 'administrator',
+      reason: available ? null : 'Administrator access, tun2socks, and Wintun are required for Full TUN mode.',
+    };
+  } else {
+    vpnStatus.tunCapability = { available: false, privilegeMode: 'unsupported', reason: `TUN mode is not supported on ${process.platform}.` };
+  }
 }
 
 function addLog(source: 'xray' | 'tun' | 'system', level: 'info' | 'warn' | 'error', message: string) {
@@ -234,7 +256,7 @@ async function disconnectVpn(): Promise<void> {
 }
 
 async function handleUnexpectedExit(component: string, code: number | null): Promise<void> {
-  if (!vpnStatus.connected) return;
+  if (!vpnStatus.connected && !vpnStatus.connecting) return;
   const message = `${component} process exited unexpectedly (code ${code ?? 'unknown'})`;
   vpnStatus.connected = false;
   vpnStatus.connectedAt = null;
@@ -253,6 +275,26 @@ async function handleUnexpectedExit(component: string, code: number | null): Pro
 
 async function stopVpnResources(): Promise<void> {
   stopStatsPolling();
+  if (process.platform === 'linux') {
+    const errors: unknown[] = [];
+    if (vpnStatus.tunActive || vpnStatus.tunState === 'preparing' || vpnStatus.tunState === 'active') vpnStatus.tunState = 'restoring';
+    try {
+      await tunManager?.stop();
+      vpnStatus.tunActive = false;
+      vpnStatus.tunProtection = { ipv4: false, ipv6: 'none' };
+    } catch (error) { errors.push(error); }
+    const results = await Promise.allSettled([
+      disableSystemProxy(),
+      disableTerminalProxy(persistedData.httpPort, persistedData.socksPort),
+      xrayRunner?.stop(),
+    ]);
+    if (results[0].status === 'fulfilled') vpnStatus.systemProxyActive = false;
+    if (results[1].status === 'fulfilled') vpnStatus.terminalEnvActive = false;
+    for (const result of results) if (result.status === 'rejected') errors.push(result.reason);
+    vpnStatus.tunState = errors.length ? 'error' : 'idle';
+    if (errors.length) throw new Error(`Network cleanup failed: ${errors.map(String).join('; ')}`);
+    return;
+  }
   const results = await Promise.allSettled([
     tunManager?.stop(),
     disableSystemProxy(),
@@ -325,8 +367,10 @@ async function connectVpnNow(targetServerId: string | undefined, signal: AbortSi
     validateNetworkSettings(persistedData, {});
     await stopVpnResources();
     signal.throwIfAborted();
-    if (persistedData.routingMode === 'tun' && process.platform !== 'win32') {
-      throw new Error('Full TUN mode is not available on Linux yet. Use Local Proxy mode.');
+    if (persistedData.routingMode === 'tun') {
+      checkBinaries();
+      if (!vpnStatus.tunCapability.available) throw new Error(vpnStatus.tunCapability.reason || 'TUN mode is unavailable.');
+      vpnStatus.tunState = 'preparing';
     }
 
     let serverIps: string[] = [];
@@ -334,7 +378,7 @@ async function connectVpnNow(targetServerId: string | undefined, signal: AbortSi
     if (persistedData.routingMode === 'tun') {
       serverIps = await waitForConnectionTask(resolveServerAddresses(node.address), signal);
       if (!serverIps.length) throw new Error('Could not resolve the VPN server for TUN routing');
-      physicalRoute = await waitForConnectionTask(detectPhysicalGateway(serverIps[0].includes(':') ? 6 : 4), signal);
+      physicalRoute = await waitForConnectionTask(detectPhysicalGateway(serverIps[0].includes(':') ? 6 : 4, serverIps[0]), signal);
     }
 
     const configOptions = {
@@ -358,6 +402,8 @@ async function connectVpnNow(targetServerId: string | undefined, signal: AbortSi
       await tunManager.start(resolveBinDir(), persistedData.socksPort, node.address, serverIps, physicalRoute, signal);
       signal.throwIfAborted();
       vpnStatus.tunActive = true;
+      vpnStatus.tunState = 'active';
+      vpnStatus.tunProtection = { ipv4: true, ipv6: process.platform === 'win32' ? 'captured' : 'blocked' };
       vpnStatus.systemProxyActive = false;
     } else {
       const proxyResult = await enableSystemProxy(persistedData.httpPort);
@@ -400,6 +446,7 @@ async function connectVpnNow(targetServerId: string | undefined, signal: AbortSi
     vpnStatus.connecting = false;
     vpnStatus.connectedAt = null;
     vpnStatus.lastError = signal.aborted ? null : msg;
+    if (persistedData.routingMode === 'tun') vpnStatus.tunState = 'error';
     broadcastStatus();
     return { ok: false, error: msg };
   }
@@ -451,8 +498,9 @@ function registerIpcHandlers() {
 
   ipcMain.handle('vpn:set-routing-mode', async (_e, mode: RoutingMode) => {
     if (mode !== 'tun' && mode !== 'system_proxy') return { ok: false, error: 'Invalid routing mode' };
-    if (mode === 'tun' && process.platform !== 'win32') {
-      return { ok: false, error: 'Full TUN mode is not available on Linux yet. Use Local Proxy mode.' };
+    if (mode === 'tun') {
+      checkBinaries();
+      if (!vpnStatus.tunCapability.available) return { ok: false, error: vpnStatus.tunCapability.reason || 'TUN mode is unavailable.' };
     }
     if (mode === persistedData.routingMode) return { ok: true };
     const wasLive = vpnStatus.connected || vpnStatus.connecting;
@@ -506,12 +554,13 @@ function registerIpcHandlers() {
       await disconnectVpn();
       const exePath = process.execPath;
       const appPath = app.getAppPath();
-      const psCmd = `Start-Process -FilePath '${exePath}' -ArgumentList '${appPath}' -Verb RunAs`;
+      const quote = (value: string) => `'${value.replace(/'/g, "''")}'`;
+      const psCmd = `$ErrorActionPreference = 'Stop'; Start-Process -FilePath ${quote(exePath)} -ArgumentList ${quote(appPath)} -Verb RunAs`;
       await execFileAsync('powershell.exe', [
         '-NoProfile',
         '-NonInteractive',
-        '-Command',
-        psCmd,
+        '-EncodedCommand',
+        Buffer.from(psCmd, 'utf16le').toString('base64'),
       ]);
       app.quit();
       return { ok: true };

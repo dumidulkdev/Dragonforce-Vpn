@@ -9,8 +9,8 @@ import { test } from 'node:test';
 import { parseShareLink } from '../src/main/parser.ts';
 import { deferred } from './helpers/backend.mts';
 
-async function virtualProcesses(moduleName: 'tunManager' | 'xrayRunner') {
-  const controls: any = { autoExit: true, spawnError: '', failAdd: '', failDelete: '', commands: [], routes: new Map(), children: [], exits: [], flushes: 0 };
+async function virtualProcesses(moduleName: 'tunManager' | 'xrayRunner', platform: NodeJS.Platform = 'win32') {
+  const controls: any = { autoExit: true, spawnError: '', failAdd: '', failDelete: '', commands: [], routes: new Map(), children: [], exits: [], flushes: 0, events: [], spawns: [], helpers: [] };
   class Child extends EventEmitter {
     stdout = new EventEmitter();
     stderr = new EventEmitter();
@@ -25,13 +25,15 @@ async function virtualProcesses(moduleName: 'tunManager' | 'xrayRunner') {
     }
     kill() {
       this.killed = true;
+      controls.events.push('tun2socks-stop');
       if (controls.autoExit) queueMicrotask(() => this.exit(null, 'SIGTERM'));
       return true;
     }
   }
-  const fakeSpawn = () => {
+  const fakeSpawn = (file: string, args: string[]) => {
     const child = new Child();
     controls.children.push(child);
+    controls.spawns.push({ file, args });
     if (controls.spawnError) {
       child.pid = undefined;
       queueMicrotask(() => child.emit('error', new Error(controls.spawnError)));
@@ -42,6 +44,14 @@ async function virtualProcesses(moduleName: 'tunManager' | 'xrayRunner') {
     const done = rest.at(-1);
     controls.commands.push({ file, args });
     void (async () => {
+      if (file === '/usr/bin/ip') {
+        const joined = args.join(' ');
+        if (joined === '-6 -json route show default') return '[]';
+        if (joined.startsWith('-4 -json route get ')) return '[{"gateway":"192.0.2.1","dev":"eth0","type":"unicast"}]';
+        if (joined === '-4 -json route show default') return '[{"dst":"default","gateway":"192.0.2.1","dev":"eth0","metric":100}]';
+        if (joined === '-json link show dev eth0') return '[{"ifindex":7,"ifname":"eth0"}]';
+        throw new Error(`Unexpected Linux ip command: ${joined}`);
+      }
       if (file === 'ipconfig.exe') controls.flushes++;
       if (file !== 'powershell.exe') return '';
       const script = args.at(-1)!;
@@ -69,9 +79,31 @@ async function virtualProcesses(moduleName: 'tunManager' | 'xrayRunner') {
     })().then(stdout => done(null, { stdout, stderr: '' }), done);
   };
   const sourcePath = path.resolve(`src/main/${moduleName}.ts`);
+  const actualNet = await import('node:net');
+  const fakeNet = {
+    ...actualNet.default,
+    connect() {
+      const socket = new EventEmitter() as any;
+      socket.destroy = () => {};
+      socket.setTimeout = () => socket;
+      queueMicrotask(() => socket.emit('connect'));
+      return socket;
+    },
+  };
+  class FakeLinuxHelper {
+    running = false;
+    constructor(_log: any, _exit: any) { controls.helpers.push(this); }
+    isRunning() { return this.running; }
+    newSessionId() { return '12345678-1234-1234-1234-123456789abc'; }
+    async start() { this.running = true; controls.events.push('helper-start'); }
+    async prepare() { controls.events.push('helper-prepare'); }
+    async activate() { controls.events.push('helper-activate'); }
+    async deactivate() { controls.events.push('helper-deactivate'); }
+    async cleanup() { controls.events.push('helper-cleanup'); this.running = false; }
+  }
   const context = vm.createContext({
     Buffer, URL, AbortController,
-    process: { platform: 'win32', env: {} },
+    process: { platform, env: {} },
     setTimeout: (callback: any, ms: number) => setTimeout(callback, Math.min(ms, 5)),
     clearTimeout,
   });
@@ -80,12 +112,17 @@ async function virtualProcesses(moduleName: 'tunManager' | 'xrayRunner') {
     const values = name === 'node:fs'
       ? { default: { existsSync: () => true, mkdirSync() {}, writeFileSync() {} } }
       : name === 'node:child_process' ? { spawn: fakeSpawn, execFile: fakeExec }
+      : name === 'node:net' ? { default: fakeNet }
       : name === './binaries.ts' ? {
         nativeBinaryNames: () => ({ xray: 'xray.exe', tun2socks: 'tun2socks.exe', wintun: 'wintun.dll' }),
         resolveNativeBinaries: () => ({
-          xrayPath: path.resolve('virtual/bin/xray.exe'), tun2socksPath: null, wintunPath: null,
+          xrayPath: path.resolve('virtual/bin/xray.exe'), tun2socksPath: path.resolve('virtual/bin/tun2socks'), wintunPath: null,
           geoipPath: null, geositePath: null, xrayAssetDir: null,
         }),
+      }
+      : name === './linuxNetworkHelper.ts' ? {
+        getLinuxTunCapability: () => ({ supported: true, available: true, privilegeMode: 'polkit', reason: null }),
+        IP_PATH: '/usr/bin/ip', LINUX_TUN_NAME: 'dfvpn0', LinuxNetworkHelperClient: FakeLinuxHelper,
       }
       : await import(name.startsWith('node:') ? name : new URL(name, pathToFileURL(sourcePath)).href);
     return new vm.SyntheticModule(Object.keys(values), function () {
@@ -96,8 +133,40 @@ async function virtualProcesses(moduleName: 'tunManager' | 'xrayRunner') {
   const api = entry.namespace as any;
   const onExit = (code: number | null) => controls.exits.push(code);
   const runner = moduleName === 'tunManager' ? new api.TunManager(() => {}, onExit) : new api.XrayRunner('virtual/bin', 'virtual/data', () => {}, onExit);
-  return { runner, controls };
+  return { runner, controls, api };
 }
+
+await test('Linux gateway detection parses iproute2 JSON without elevation', async () => {
+  const { api, controls } = await virtualProcesses('tunManager', 'linux');
+  const route = await api.detectPhysicalGateway(4);
+  assert.equal(route.gatewayIp, '192.0.2.1');
+  assert.equal(route.interfaceName, 'eth0');
+  assert.equal(route.interfaceIndex, '7');
+  assert.ok(controls.commands.every((command: any) => command.file === '/usr/bin/ip'));
+});
+
+await test('Linux TUN uses an unprivileged tun2socks process and helper-controlled route ordering', async () => {
+  const { runner, controls } = await virtualProcesses('tunManager', 'linux');
+  await runner.start('virtual/bin', 10808, '203.0.113.1', ['203.0.113.1']);
+  assert.equal(runner.isRunning(), true);
+  assert.deepEqual(controls.events.slice(0, 3), ['helper-start', 'helper-prepare', 'helper-activate']);
+  assert.equal(controls.spawns.length, 1, 'only unprivileged tun2socks should be spawned by TunManager');
+  assert.equal(controls.spawns[0].file, path.resolve('virtual/bin/tun2socks'));
+  assert.equal(Array.from(controls.spawns[0].args.slice(0, 4)).join('|'), '--device|dfvpn0|--proxy|socks5://127.0.0.1:10808');
+  await runner.stop();
+  assert.deepEqual(controls.events.slice(-2), ['tun2socks-stop', 'helper-cleanup']);
+  assert.equal(runner.isRunning(), false);
+});
+
+await test('Linux TUN cleanup restarts the helper to reconcile a stale privileged journal', async () => {
+  const { runner, controls } = await virtualProcesses('tunManager', 'linux');
+  await runner.start('virtual/bin', 10808, '203.0.113.1', ['203.0.113.1']);
+  controls.helpers[0].running = false;
+  await runner.stop();
+  assert.equal(controls.helpers.length, 2);
+  assert.equal(controls.events.filter((event: string) => event === 'helper-start').length, 2);
+  assert.equal(runner.isRunning(), false);
+});
 
 await test('TUN captures both IPv4 and IPv6 and restores only routes it created', async () => {
   const { runner, controls } = await virtualProcesses('tunManager');

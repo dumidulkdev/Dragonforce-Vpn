@@ -26,7 +26,7 @@ export const seed = () => ({
 export async function backend(
   kind: 'standalone' | 'electron' = 'standalone',
   initial: any = seed(),
-  options: { occupiedPort?: boolean; platform?: NodeJS.Platform } = {}
+  options: { occupiedPort?: boolean; platform?: NodeJS.Platform; linuxTunAvailable?: boolean } = {}
 ) {
   const controls: any = {
     running: false, actualServer: null, starts: 0, stops: 0, proxy: false, terminal: false,
@@ -145,6 +145,14 @@ export async function backend(
         xrayAssetDir: null,
       }),
     },
+    './linuxNetworkHelper.ts': {
+      getLinuxTunCapability: () => ({
+        supported: (options.platform || 'win32') === 'linux',
+        available: Boolean(options.linuxTunAvailable),
+        privilegeMode: (options.platform || 'win32') === 'linux' ? 'polkit' : 'unsupported',
+        reason: options.linuxTunAvailable ? null : 'Linux TUN mode requires the DragonForce network helper to be installed by the package manager.',
+      }),
+    },
     './xrayRunner.ts': { XrayRunner: FakeXray, testProxyConnectivity: async () => ({ ok: true, latencyMs: 1 }) },
     './systemProxy.ts': {
       enableSystemProxy: async () => {
@@ -171,7 +179,7 @@ export async function backend(
       getTerminalProxyCommands: () => ({}),
     },
     './tunManager.ts': {
-      TunManager: FakeTun, checkIsAdmin: async () => true,
+      TunManager: FakeTun, checkIsAdmin: async () => (options.platform || 'win32') === 'win32',
       detectPhysicalGateway: async () => ({ interfaceName: 'QA', gatewayIp: '192.0.2.1', interfaceIndex: '7' }),
       resolveServerIpv4List: async () => {
         controls.resolveEntered?.();

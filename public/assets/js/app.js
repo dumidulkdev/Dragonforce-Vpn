@@ -217,7 +217,9 @@ try {
 }
 
 function renderNav() {
-  const admin = store.status?.isAdmin;
+  const status = store.status;
+  const linux = status?.platform === 'linux';
+  const tunReady = linux ? status?.tunCapability?.available : status?.isAdmin;
   const isDark = getActiveTheme() === 'dark';
   rail.innerHTML = `
     <div class="rail-brand" data-rail-about="open" title="${APP_RELEASE_INFO.name} ${APP_RELEASE_INFO.version} — Click for About & Release Info" style="cursor:pointer">${brandMark(36)}</div>
@@ -228,8 +230,8 @@ function renderNav() {
       <button type="button" class="rail-theme-btn" data-rail-theme="toggle" title="${isDark ? 'Switch to Light theme' : 'Switch to Dark theme'}" aria-label="Toggle dark theme">
         ${icon(isDark ? 'sun' : 'moon', 17)}
       </button>
-      <span class="rail-badge${admin ? ' is-admin' : ''}" title="${admin ? 'Administrator — Full TUN available' : 'Standard user — System proxy only'}">${icon(admin ? 'shieldCheck' : 'shield', 18)}</span>
-      <span class="rail-badge-label">${admin ? 'Admin' : 'Standard'}</span>
+      <span class="rail-badge${tunReady ? ' is-admin' : ''}" title="${linux ? (tunReady ? 'Linux TUN available through polkit' : escapeHtml(status?.tunCapability?.reason || 'Linux TUN unavailable')) : (tunReady ? 'Administrator — Full TUN available' : 'Standard user — System proxy only')}">${icon(tunReady ? 'shieldCheck' : 'shield', 18)}</span>
+      <span class="rail-badge-label">${linux ? (tunReady ? 'Linux TUN' : 'Local proxy') : (tunReady ? 'Admin' : 'Standard')}</span>
       <button type="button" class="rail-ver-pill" data-rail-about="open" title="About ${APP_RELEASE_INFO.name} (${APP_RELEASE_INFO.version})">${APP_RELEASE_INFO.version}</button>
     </div>`;
 }
@@ -834,8 +836,10 @@ async function init() {
   events.addEventListener('session', (e) => { apiToken = JSON.parse(e.data).apiToken; });
   events.addEventListener('status', (e) => {
     const prevAdmin = store.status?.isAdmin;
+    const prevTunAvailable = store.status?.tunCapability?.available;
+    const prevPlatform = store.status?.platform;
     store.status = JSON.parse(e.data);
-    if (prevAdmin !== store.status.isAdmin) renderNav();
+    if (prevAdmin !== store.status.isAdmin || prevTunAvailable !== store.status.tunCapability?.available || prevPlatform !== store.status.platform) renderNav();
     if (store.view === 'dashboard') dashboard.update(store);
     else if (store.view === 'shield' || store.view === 'settings' || store.view === 'speed' || store.view === 'servers' || store.view === 'subscriptions') renderView(false);
   });

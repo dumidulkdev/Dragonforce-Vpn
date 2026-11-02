@@ -163,6 +163,7 @@ export default function App() {
   const activeServer: ServerNode | undefined = data.servers.find(
     (s) => s.id === status.activeServerId
   );
+  const isLinux = status.platform === 'linux';
 
   const handleToggleConnect = async () => {
     setTunnelTestResult(null);
@@ -310,7 +311,9 @@ export default function App() {
           >
             <span>TRAFFIC ROUTING MODE</span>
             <span>
-              {status.routingMode === 'tun' ? 'Wintun L3 Adapter' : `HTTP :${status.httpPort}`}
+              {status.tunActive
+                ? isLinux ? 'Linux IPv4 TUN' : 'Wintun L3 Adapter'
+                : `HTTP :${status.httpPort}`}
             </span>
           </div>
           <div className="mode-selector">
@@ -319,20 +322,22 @@ export default function App() {
               onClick={() => window.vpnApi.setRoutingMode('system_proxy')}
             >
               <ShieldCheck size={15} />
-              System Proxy
+              {isLinux ? 'Local Proxy' : 'System Proxy'}
             </button>
             <button
               className={`mode-btn tun ${status.routingMode === 'tun' ? 'active' : ''}`}
               onClick={() => window.vpnApi.setRoutingMode('tun')}
+              disabled={isLinux && !status.tunCapability.available}
+              title={isLinux && !status.tunCapability.available ? status.tunCapability.reason || '' : ''}
             >
               <Terminal size={15} />
-              Full TUN Mode
+              {isLinux ? 'Linux TUN' : 'Full TUN Mode'}
             </button>
           </div>
         </div>
 
         {/* ADMIN / TERMINAL HELPER BANNER */}
-        {status.routingMode === 'tun' && !status.isAdmin && (
+        {status.routingMode === 'tun' && !isLinux && !status.isAdmin && (
           <div className="alert-banner">
             <div>
               <strong>TUN Mode needs Admin</strong>
@@ -347,6 +352,18 @@ export default function App() {
             >
               Elevate
             </button>
+          </div>
+        )}
+        {isLinux && (
+          <div className={`alert-banner ${status.tunCapability.available ? 'success' : ''}`}>
+            <div>
+              <strong>Linux network helper</strong>
+              <div style={{ fontSize: '0.73rem', opacity: 0.9 }}>
+                {status.tunCapability.available
+                  ? 'Installed. Polkit authorization is requested when Linux TUN connects.'
+                  : status.tunCapability.reason}
+              </div>
+            </div>
           </div>
         )}
 
