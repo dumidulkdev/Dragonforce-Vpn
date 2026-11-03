@@ -57,4 +57,9 @@ test('Android project (apps/android) is configured with Capacitor, VpnService, Q
   assert.ok(serviceSrc.includes('addDisallowedApplication'), 'Supports per-app bypass split tunneling');
   assert.ok(serviceSrc.includes('addAllowedApplication'), 'Supports per-app VPN-only split tunneling');
   assert.ok(serviceSrc.includes('198.18.0.1'), 'Configures FakeDNS TUN address');
+
+  const workflowPath = path.resolve('.github/workflows/android-release.yml');
+  assert.ok(fs.existsSync(workflowPath), 'Android CI/Release workflow exists');
+  const workflow = fs.readFileSync(workflowPath, 'utf-8');
+  assert.ok(workflow.includes('npm run build:android'), 'Workflow invokes npm run build:android');
 });

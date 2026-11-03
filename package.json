@@ -19,6 +19,7 @@
     "setup:android-bins": "node scripts/download-android-binaries.mjs",
     "setup:release-bins": "node scripts/prepare-native.mjs",
     "build:electron": "node scripts/build-electron.mjs",
+    "build:android": "node scripts/build-android.mjs",
     "dev:vite": "vite",
     "build:vite": "vite build",
     "build": "npm run build:electron && npm run build:vite",
