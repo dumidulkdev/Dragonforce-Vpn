@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#181214"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/widget_status_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="DragonForce VPN • Disconnected"
+            android:textColor="#FAFAFA"
+            android:textSize="14sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/widget_server_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Tap to connect encrypted tunnel"
+            android:textColor="#A1A1AA"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/widget_traffic_stats"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="↓ 0 KB/s   ↑ 0 KB/s"
+            android:textColor="#F87171"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/widget_toggle_btn"
+        android:layout_width="wrap_content"
+        android:layout_height="40dp"
+        android:background="#DC2626"
+        android:paddingLeft="16dp"
+        android:paddingRight="16dp"
+        android:text="Connect"
+        android:textAllCaps="false"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:textStyle="bold" />
+
+</LinearLayout>

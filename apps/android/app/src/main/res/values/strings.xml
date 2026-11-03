@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DragonForce VPN</string>
+    <string name="qs_tile_label">DragonForce VPN</string>
+    <string name="widget_label">DragonForce VPN Status</string>
+    <string name="notif_channel_status">VPN Tunnel Status</string>
+    <string name="notif_channel_alerts">Connection &amp; Data Cap Alerts</string>
+    <string name="notif_channel_subs">Subscription Updates</string>
+    <string name="notif_channel_insights">Usage &amp; Shield Insights</string>
+</resources>
