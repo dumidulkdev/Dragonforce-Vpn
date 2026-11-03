@@ -1,0 +1,12 @@
+{
+  "name": "@dragonforce-vpn/core",
+  "version": "2.4.1",
+  "type": "module",
+  "private": true,
+  "description": "Platform-agnostic VPN core logic for DragonForce VPN (Windows, Android, and Linux)",
+  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*"
+  }
+}
