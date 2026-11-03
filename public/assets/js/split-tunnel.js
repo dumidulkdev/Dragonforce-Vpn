@@ -77,6 +77,21 @@ const PRESET_CATALOG = [
   },
 ];
 
+const DEFAULT_ANDROID_APPS = [
+  { packageName: 'com.whatsapp', name: 'WhatsApp Messenger', isSystem: false },
+  { packageName: 'org.telegram.messenger', name: 'Telegram', isSystem: false },
+  { packageName: 'com.google.android.youtube', name: 'YouTube', isSystem: false },
+  { packageName: 'com.android.chrome', name: 'Google Chrome', isSystem: true },
+  { packageName: 'com.instagram.android', name: 'Instagram', isSystem: false },
+  { packageName: 'com.netflix.mediaclient', name: 'Netflix', isSystem: false },
+  { packageName: 'lk.combank.digital', name: 'ComBank Digital (Sri Lanka)', isSystem: false },
+  { packageName: 'lk.sampath.vishwa', name: 'Sampath Vishwa', isSystem: false },
+  { packageName: 'lk.dialog.mydialog', name: 'MyDialog (Sri Lanka)', isSystem: false },
+  { packageName: 'com.discord', name: 'Discord', isSystem: false },
+  { packageName: 'com.valvesoftware.android.steam.community', name: 'Steam Mobile', isSystem: false },
+  { packageName: 'com.spotify.music', name: 'Spotify', isSystem: false },
+];
+
 function ensureClientSplitTunnel(st) {
   const raw = st || {};
   const presets = raw.presets || {};
@@ -92,6 +107,11 @@ function ensureClientSplitTunnel(st) {
     },
     customDomains: Array.isArray(raw.customDomains) ? raw.customDomains : [],
     customIps: Array.isArray(raw.customIps) ? raw.customIps : [],
+    perAppMode:
+      raw.perAppMode === 'bypass_selected' || raw.perAppMode === 'only_selected'
+        ? raw.perAppMode
+        : 'off',
+    selectedApps: Array.isArray(raw.selectedApps) ? raw.selectedApps : [],
   };
 }
 
@@ -213,6 +233,20 @@ export function renderSplitTunnel(root, store) {
   const testResult =
     store.splitTestResult ||
     previewClientRoute(currentTestTarget, st, store.data?.bypassLan ?? true);
+
+  const perAppMode = st.perAppMode || 'off';
+  const selectedApps = st.selectedApps || [];
+  const rawApps =
+    Array.isArray(store.installedApps) && store.installedApps.length > 0
+      ? store.installedApps
+      : DEFAULT_ANDROID_APPS;
+  const appSearch = (store.splitAppSearch || '').trim().toLowerCase();
+  const filteredApps = rawApps.filter(
+    (app) =>
+      !appSearch ||
+      app.name.toLowerCase().includes(appSearch) ||
+      app.packageName.toLowerCase().includes(appSearch)
+  );
 
   root.innerHTML = `<div class="page st-page">
     <!-- Page Header -->
@@ -521,5 +555,93 @@ export function renderSplitTunnel(root, store) {
         </section>
       </div>
     </div>
+
+    <!-- 3. Android Per-App Split Tunneling Studio Card -->
+    <section class="panel st-card st-per-app-panel">
+      <div class="st-card-head">
+        <div class="st-card-head-text">
+          <div class="st-title-row">
+            <h2 class="st-card-title">Android Per-App Split Tunneling (VpnService App Routing)</h2>
+            <span class="st-count-pill ${perAppMode !== 'off' ? 'is-active' : ''}">
+              ${
+                perAppMode === 'bypass_selected'
+                  ? `Bypassing ${selectedApps.length} Apps`
+                  : perAppMode === 'only_selected'
+                    ? `VPN-Only for ${selectedApps.length} Apps`
+                    : 'All Apps Follow Default Policy'
+              }
+            </span>
+          </div>
+          <p class="st-card-sub">Control which Android applications enter the system TUN interface via <code>VpnService.Builder.addDisallowedApplication</code> / <code>addAllowedApplication</code>.</p>
+        </div>
+      </div>
+
+      <div class="st-per-app-toolbar">
+        <div class="segmented" role="group" aria-label="Android Per-App Split Tunnel Mode">
+          <button type="button" data-act="st-per-app-mode" data-mode="off" aria-pressed="${perAppMode === 'off'}">
+            ${icon('shieldCheck', 14)} All Apps (Default)
+          </button>
+          <button type="button" data-act="st-per-app-mode" data-mode="bypass_selected" aria-pressed="${perAppMode === 'bypass_selected'}">
+            ${icon('zap', 14)} Bypass Selected Apps
+          </button>
+          <button type="button" data-act="st-per-app-mode" data-mode="only_selected" aria-pressed="${perAppMode === 'only_selected'}">
+            ${icon('route', 14)} Only Selected Apps Use VPN
+          </button>
+        </div>
+
+        <label class="field st-app-search-field">
+          ${icon('search', 15)}
+          <input
+            type="text"
+            data-ref="stAppSearch"
+            placeholder="Search installed Android apps or package name…"
+            value="${escapeHtml(store.splitAppSearch || '')}"
+            autocomplete="off"
+          />
+        </label>
+      </div>
+
+      <div class="st-app-grid">
+        ${filteredApps
+          .map((app) => {
+            const isSelected = selectedApps.includes(app.packageName);
+            const badgeText =
+              perAppMode === 'bypass_selected' && isSelected
+                ? 'BYPASS (ISP)'
+                : perAppMode === 'only_selected' && isSelected
+                  ? 'VPN ONLY'
+                  : isSelected
+                    ? 'SELECTED'
+                    : 'DEFAULT';
+            return `
+              <div class="st-app-item ${isSelected ? 'is-selected' : ''}">
+                <div class="st-app-meta">
+                  <strong class="st-app-name">${escapeHtml(app.name)}</strong>
+                  <span class="st-app-pkg mono">${escapeHtml(app.packageName)}</span>
+                </div>
+                <div class="st-app-actions">
+                  <span class="st-route-badge ${
+                    isSelected
+                      ? perAppMode === 'bypass_selected'
+                        ? 'is-direct'
+                        : 'is-vpn'
+                      : 'is-muted'
+                  }">${badgeText}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    class="switch"
+                    data-act="st-toggle-app"
+                    data-pkg="${escapeHtml(app.packageName)}"
+                    aria-checked="${isSelected}"
+                    aria-label="Toggle ${escapeHtml(app.name)}"
+                  ></button>
+                </div>
+              </div>
+            `;
+          })
+          .join('')}
+      </div>
+    </section>
   </div>`;
 }

@@ -12,8 +12,8 @@ export const APP_RELEASE_INFO = {
   version: 'v2.4.1',
   channel: 'Stable Release · GitHub Edition',
   buildDate: '2026.11',
-  buildTarget: 'Windows x64 / ARM64 / x86 (TUN + System Proxy)',
-  coreEngine: 'Xray-core v26.10.31 · Wintun 0.14.1',
+  buildTarget: 'Windows x64 / ARM64 / x86 & Android APK (ARM64 / Universal)',
+  coreEngine: 'Xray-core v26.10.31 · Wintun 0.14.1 · Android VpnService',
   whatsappNumber: '0710709140',
   whatsappFormatted: '071 070 9140 (+94 71 070 9140)',
   whatsappDirectUrl: 'https://wa.me/94710709140?text=Hello%20DragonForce%20Vpn',
@@ -1495,9 +1495,21 @@ export function openSubscriptionModal({ subId, store, api, actions }) {
 export function renderSettings(root, store) {
   const st = store.status;
   const d = store.data;
-  const isDark = (d.theme || document.documentElement.dataset.theme || 'light') === 'dark';
+  const currentTheme = d.theme || document.documentElement.dataset.themeMode || document.documentElement.dataset.theme || 'light';
+  const isDark = currentTheme === 'dark' || currentTheme === 'material_you';
+  const notifs = {
+    connectionEvents: true,
+    connectionLost: true,
+    connectionFailed: true,
+    dataCapAlerts: true,
+    subscriptionUpdates: true,
+    usageSummary: false,
+    shieldMilestones: true,
+    ...(d.notifications || {}),
+  };
   const cmds = store.terminalCommands || {};
-  const sw = (act, on, label) => `<button class="switch" role="switch" aria-checked="${on}" aria-label="${label}" data-act="${act}"></button>`;
+  const sw = (act, on, label, extraAttr = '') =>
+    `<button class="switch" role="switch" aria-checked="${on}" aria-label="${label}" data-act="${act}" ${extraAttr}></button>`;
   const cmdRows = [
     ['PowerShell', cmds.powershell],
     ['Command Prompt', cmds.cmd],
@@ -1516,16 +1528,55 @@ export function renderSettings(root, store) {
       <div class="section-title">Appearance &amp; Theme</div>
       <div class="setting">
         <div class="setting-text">
-          <strong>System-wide dark theme</strong>
-          <span>Switch the entire application — including the interactive world map, telemetry charts, Shield studio, and modals — between crisp daylight and low-glare dark mode.</span>
+          <strong>System-wide theme &amp; Material You</strong>
+          <span>Switch the entire application — including the interactive world map, telemetry charts, Shield studio, and modals — between crisp daylight, low-glare dark mode, or Android 12+ Material You dynamic wallpaper colors.</span>
         </div>
         <div class="row" style="gap:14px">
           <div class="segmented" role="group" aria-label="Theme mode">
-            <button type="button" data-act="set-theme" data-theme="light" aria-pressed="${!isDark}">${icon('sun', 15)}Light</button>
-            <button type="button" data-act="set-theme" data-theme="dark" aria-pressed="${isDark}">${icon('moon', 15)}Dark</button>
+            <button type="button" data-act="set-theme" data-theme="light" aria-pressed="${currentTheme === 'light'}">${icon('sun', 15)}Light</button>
+            <button type="button" data-act="set-theme" data-theme="dark" aria-pressed="${currentTheme === 'dark'}">${icon('moon', 15)}Dark</button>
+            <button type="button" data-act="set-theme" data-theme="material_you" aria-pressed="${currentTheme === 'material_you'}">${icon('zap', 15)}Material You</button>
           </div>
           ${sw('toggle-theme', isDark, 'System-wide dark theme')}
         </div>
+      </div>
+    </section>
+    <section class="panel section">
+      <div class="section-title">Notifications &amp; Android Alerts</div>
+      <div class="setting">
+        <div class="setting-text">
+          <strong>Connection &amp; Disconnection Alerts</strong>
+          <span>Show status notifications when the VPN tunnel connects or disconnects, alongside the persistent foreground speed bar.</span>
+        </div>
+        ${sw('notif-toggle', !!notifs.connectionEvents, 'Connection & Disconnection Alerts', 'data-key="connectionEvents"')}
+      </div>
+      <div class="setting">
+        <div class="setting-text">
+          <strong>Unexpected Connection Lost / Failed Alerts</strong>
+          <span>High-priority alert if the VPN tunnel drops unexpectedly or is revoked by the system.</span>
+        </div>
+        ${sw('notif-toggle', !!notifs.connectionLost, 'Unexpected Connection Lost Alerts', 'data-key="connectionLost"')}
+      </div>
+      <div class="setting">
+        <div class="setting-text">
+          <strong>Data Cap 80% Warning &amp; 100% Limit Alerts</strong>
+          <span>Notify immediately when your daily or monthly data usage crosses 80% and 100% of your configured quota.</span>
+        </div>
+        ${sw('notif-toggle', !!notifs.dataCapAlerts, 'Data Cap Alerts', 'data-key="dataCapAlerts"')}
+      </div>
+      <div class="setting">
+        <div class="setting-text">
+          <strong>Subscription Feed Sync Updates</strong>
+          <span>Notify when remote VLESS/VMess subscription feeds are refreshed with new server nodes.</span>
+        </div>
+        ${sw('notif-toggle', !!notifs.subscriptionUpdates, 'Subscription Feed Sync Updates', 'data-key="subscriptionUpdates"')}
+      </div>
+      <div class="setting">
+        <div class="setting-text">
+          <strong>Privacy Shield Milestones &amp; Usage Insights</strong>
+          <span>Celebrate Privacy &amp; Ad Shield milestones (100, 1,000, 10,000+ ads &amp; trackers blocked).</span>
+        </div>
+        ${sw('notif-toggle', !!notifs.shieldMilestones, 'Privacy Shield Milestones', 'data-key="shieldMilestones"')}
       </div>
     </section>
     <section class="panel section">

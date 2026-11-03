@@ -75,10 +75,10 @@ android {
     }
 }
 
-// Automatically sync shared web UI from ../../public into assets/public before packaging
+// Automatically sync shared web UI from ../../public into src/main/assets before packaging
 tasks.register('syncWebAssets', Copy) {
     from("${rootProject.projectDir}/../../public")
-    into("${projectDir}/src/main/assets/public")
+    into("${projectDir}/src/main/assets")
 }
 
 preBuild.dependsOn(syncWebAssets)

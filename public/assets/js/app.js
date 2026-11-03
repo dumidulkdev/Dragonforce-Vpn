@@ -47,6 +47,10 @@ const store = {
   adblockCheckResult: null,
   splitTestInput: 'combank.lk',
   splitTestResult: null,
+  splitAppSearch: '',
+  installedApps: [],
+  dynamicColors: null,
+  platform: typeof window !== 'undefined' && window.DragonForceAndroid ? 'android' : 'desktop',
 };
 
 // ---------------------------------------------------------------- API
@@ -180,24 +184,49 @@ function getActiveTheme() {
 }
 
 async function applyTheme(theme, { persist = true, notify = false } = {}) {
-  const normalized = theme === 'dark' ? 'dark' : 'light';
+  const normalized =
+    theme === 'material_you' ? 'material_you' : theme === 'dark' ? 'dark' : 'light';
+  const baseMode = normalized === 'light' ? 'light' : 'dark';
   const prev = document.documentElement.dataset.theme;
-  document.documentElement.dataset.theme = normalized;
+  document.documentElement.dataset.theme = baseMode;
+  document.documentElement.dataset.themeMode = normalized;
+
+  if (normalized === 'material_you') {
+    document.documentElement.dataset.materialYou = 'true';
+    const dyn = store.dynamicColors;
+    const accent = dyn?.accentHex || '#E11D48';
+    const accentSoft = dyn?.accentSoftHex || 'rgba(225, 29, 72, 0.16)';
+    document.documentElement.style.setProperty('--accent', accent);
+    document.documentElement.style.setProperty('--accent-strong', accent);
+    document.documentElement.style.setProperty('--accent-soft', accentSoft);
+  } else {
+    delete document.documentElement.dataset.materialYou;
+    document.documentElement.style.removeProperty('--accent');
+    document.documentElement.style.removeProperty('--accent-strong');
+    document.documentElement.style.removeProperty('--accent-soft');
+  }
+
   const metaScheme = document.querySelector('meta[name="color-scheme"]');
-  if (metaScheme) metaScheme.setAttribute('content', normalized);
+  if (metaScheme) metaScheme.setAttribute('content', baseMode);
   try {
     localStorage.setItem('vpn_theme', normalized);
   } catch {
     /* ignore */
   }
   if (store.data) store.data.theme = normalized;
-  if (prev !== normalized) {
-    window.dispatchEvent(new CustomEvent('vpn-theme-change', { detail: { theme: normalized } }));
+  if (prev !== baseMode) {
+    window.dispatchEvent(new CustomEvent('vpn-theme-change', { detail: { theme: baseMode, mode: normalized } }));
   }
   renderNav();
   if (store.status) renderView(false);
   if (notify) {
-    toast(normalized === 'dark' ? 'Dark theme enabled' : 'Light theme enabled');
+    toast(
+      normalized === 'material_you'
+        ? 'Material You dynamic theme enabled'
+        : normalized === 'dark'
+          ? 'Dark theme enabled'
+          : 'Light theme enabled'
+    );
   }
   if (persist) {
     await api('/api/settings', { theme: normalized }).catch(() => {});
@@ -207,10 +236,12 @@ async function applyTheme(theme, { persist = true, notify = false } = {}) {
 // Apply saved theme immediately before first paint
 try {
   const cachedTheme = localStorage.getItem('vpn_theme');
-  if (cachedTheme === 'dark' || cachedTheme === 'light') {
-    document.documentElement.dataset.theme = cachedTheme;
+  if (cachedTheme === 'dark' || cachedTheme === 'light' || cachedTheme === 'material_you') {
+    const baseMode = cachedTheme === 'light' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = baseMode;
+    document.documentElement.dataset.themeMode = cachedTheme;
     const metaScheme = document.querySelector('meta[name="color-scheme"]');
-    if (metaScheme) metaScheme.setAttribute('content', cachedTheme);
+    if (metaScheme) metaScheme.setAttribute('content', baseMode);
   }
 } catch {
   /* ignore */
@@ -441,12 +472,26 @@ async function onPageClick(e) {
     case 'allow-insecure':
       return api('/api/settings', { allowInsecureDefault: !store.data.allowInsecureDefault });
     case 'toggle-theme': {
-      const next = getActiveTheme() === 'dark' ? 'light' : 'dark';
+      const next = getActiveTheme() === 'light' ? 'dark' : 'light';
       return applyTheme(next, { persist: true, notify: true });
     }
     case 'set-theme': {
-      const target = btn.dataset.theme === 'dark' ? 'dark' : 'light';
+      const target =
+        btn.dataset.theme === 'material_you'
+          ? 'material_you'
+          : btn.dataset.theme === 'dark'
+            ? 'dark'
+            : 'light';
       return applyTheme(target, { persist: true, notify: true });
+    }
+    case 'notif-toggle': {
+      const key = btn.dataset.key;
+      if (!key) return;
+      const cur = store.data.notifications?.[key] !== false;
+      const nextNotifs = { ...(store.data.notifications || {}), [key]: !cur };
+      store.data.notifications = nextNotifs;
+      await api('/api/settings', { notifications: nextNotifs }).catch(() => {});
+      return renderView();
     }
     case 'speed-start': {
       const res = await api('/api/speedtest/start', {});
@@ -707,6 +752,28 @@ async function onPageClick(e) {
       if (res?.ok) store.splitTestResult = res;
       return renderView();
     }
+    case 'st-per-app-mode': {
+      const perAppMode = btn.dataset.mode;
+      if (!perAppMode) return;
+      const res = await api('/api/split-tunnel/config', { perAppMode }).catch(() => null);
+      if (res?.splitTunnel) store.data.splitTunnel = res.splitTunnel;
+      toast(
+        perAppMode === 'off'
+          ? 'Per-App Split Tunneling turned off (All apps use default policy)'
+          : perAppMode === 'bypass_selected'
+            ? 'Per-App Split Tunneling: Bypassing selected apps directly via ISP'
+            : 'Per-App Split Tunneling: Routing only selected apps through VPN',
+        'success'
+      );
+      return renderView();
+    }
+    case 'st-toggle-app': {
+      const pkg = btn.dataset.pkg;
+      if (!pkg) return;
+      const res = await api('/api/split-tunnel/config', { toggleApp: pkg }).catch(() => null);
+      if (res?.splitTunnel) store.data.splitTunnel = res.splitTunnel;
+      return renderView();
+    }
   }
 }
 
@@ -747,6 +814,23 @@ views.servers.addEventListener('input', (e) => {
     store.serverSearch = e.target.value;
     renderServers(views.servers, store);
     const nextInput = views.servers.querySelector('[data-ref="srvSearch"]');
+    if (nextInput) {
+      nextInput.focus();
+      try {
+        nextInput.setSelectionRange(pos, pos);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+});
+
+views.split.addEventListener('input', (e) => {
+  if (e.target.dataset.ref === 'stAppSearch') {
+    const pos = e.target.selectionStart ?? e.target.value.length;
+    store.splitAppSearch = e.target.value;
+    renderSplitTunnel(views.split, store);
+    const nextInput = views.split.querySelector('[data-ref="stAppSearch"]');
     if (nextInput) {
       nextInput.focus();
       try {
@@ -815,6 +899,29 @@ async function init() {
     data: initial.data,
     logs: initial.logs,
     terminalCommands: initial.terminalCommands,
+    installedApps: initial.installedApps || [],
+    dynamicColors: initial.dynamicColors || null,
+    platform: initial.platform || store.platform,
+  });
+
+  window.addEventListener('dragonforce:native', async (e) => {
+    const detail = e.detail || {};
+    if (detail.type === 'navigateView' && detail.payload) {
+      actions.navigate(detail.payload);
+    } else if (detail.type === 'quickConnect') {
+      await actions.connect();
+    } else if (detail.type === 'importUri' && detail.payload) {
+      const text = String(detail.payload).trim();
+      if (/^https?:\/\//i.test(text)) {
+        actions.navigate('subscriptions');
+        const res = await api('/api/add-subscription', { url: text, name: '' });
+        toast(res.ok ? `Added ${res.count} servers from shared link` : res.error || 'Import failed', res.ok ? 'success' : 'error');
+      } else {
+        await importLinks(text);
+      }
+    } else if (detail.type === 'vpnPermissionDenied') {
+      toast(detail.payload || 'VPN permission denied', 'error');
+    }
   });
   const initTheme = store.data?.theme || localStorage.getItem('vpn_theme') || 'light';
   await applyTheme(initTheme, { persist: false, notify: false });

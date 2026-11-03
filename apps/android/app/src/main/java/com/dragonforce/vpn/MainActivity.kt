@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity() {
 
         val assetLoader = WebViewAssetLoader.Builder()
             .setDomain("appassets.androidplatform.net")
-            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
+            .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
             .build()
 
         webView.settings.apply {
@@ -102,7 +102,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        webView.loadUrl("https://appassets.androidplatform.net/assets/public/index.html")
+        webView.loadUrl("https://appassets.androidplatform.net/app.html")
     }
 
     override fun onNewIntent(intent: Intent) {

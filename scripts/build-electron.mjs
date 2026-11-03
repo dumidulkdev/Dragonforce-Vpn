@@ -23,4 +23,13 @@ await Promise.all([
     outfile: 'dist-electron/controller.cjs',
     logLevel: 'info',
   }),
+  build({
+    entryPoints: ['src/android/android-bridge.ts'],
+    bundle: true,
+    platform: 'browser',
+    target: 'es2022',
+    format: 'esm',
+    outfile: 'public/assets/js/android-bridge.js',
+    logLevel: 'info',
+  }),
 ]);

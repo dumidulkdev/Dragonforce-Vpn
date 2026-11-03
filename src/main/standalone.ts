@@ -1175,8 +1175,21 @@ async function startServer() {
         try { next = validateNetworkSettings(persistedData, body, PORT); }
         catch (error) { sendJson(res, { ok: false, error: String(error instanceof Error ? error.message : error) }, 400); return; }
         const networkChanged = Object.entries(next).some(([key, value]) => value !== getNetworkSettings(persistedData)[key as keyof typeof next]);
-        if (body.theme === 'light' || body.theme === 'dark') {
+        if (body.theme === 'light' || body.theme === 'dark' || body.theme === 'material_you') {
           persistedData.theme = body.theme;
+        }
+        if (body.notifications && typeof body.notifications === 'object') {
+          persistedData.notifications = {
+            connectionEvents: true,
+            connectionLost: true,
+            connectionFailed: true,
+            dataCapAlerts: true,
+            subscriptionUpdates: true,
+            usageSummary: false,
+            shieldMilestones: true,
+            ...(persistedData.notifications || {}),
+            ...(body.notifications as Record<string, boolean>),
+          };
         }
         let result: { ok: boolean; error?: string } = { ok: true };
         if (networkChanged) {
@@ -1530,6 +1543,31 @@ async function startServer() {
             const before = st.customIps.length;
             st.customIps = st.customIps.filter((item) => item !== ip);
             if (st.customIps.length !== before) changed = true;
+          }
+
+          if (body.perAppMode === 'off' || body.perAppMode === 'bypass_selected' || body.perAppMode === 'only_selected') {
+            if (st.perAppMode !== body.perAppMode) {
+              st.perAppMode = body.perAppMode;
+              changed = true;
+            }
+          }
+
+          if (typeof body.toggleApp === 'string' && body.toggleApp.trim()) {
+            const pkg = body.toggleApp.trim();
+            const apps = Array.isArray(st.selectedApps) ? [...st.selectedApps] : [];
+            const idx = apps.indexOf(pkg);
+            if (idx >= 0) apps.splice(idx, 1);
+            else apps.push(pkg);
+            st.selectedApps = ensureSplitTunnelConfig({ ...st, selectedApps: apps }).selectedApps;
+            if ((st.selectedApps?.length || 0) > 0 && (!st.perAppMode || st.perAppMode === 'off')) {
+              st.perAppMode = 'bypass_selected';
+            }
+            changed = true;
+          }
+
+          if (Array.isArray(body.selectedApps)) {
+            st.selectedApps = ensureSplitTunnelConfig({ ...st, selectedApps: body.selectedApps as string[] }).selectedApps;
+            changed = true;
           }
 
           persistedData.splitTunnel = st;

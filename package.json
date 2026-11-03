@@ -16,6 +16,7 @@
   "main": "dist-electron/desktop.cjs",
   "scripts": {
     "setup:bins": "node scripts/download-binaries.mjs",
+    "setup:android-bins": "node scripts/download-android-binaries.mjs",
     "setup:release-bins": "node scripts/prepare-native.mjs",
     "build:electron": "node scripts/build-electron.mjs",
     "dev:vite": "vite",

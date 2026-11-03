@@ -5835,3 +5835,217 @@ code, .mono { font-family: 'Cascadia Mono', Consolas, ui-monospace, monospace; f
     grid-template-columns: 1fr;
   }
 }
+
+/* =========================================================================
+   Material You Dynamic Theme & Android Per-App Split Tunneling
+   ========================================================================= */
+
+:root[data-material-you="true"] {
+  --bg: #0D0A0B;
+  --surface: #171214;
+  --surface-2: #221A1D;
+  --surface-3: #2E2327;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+}
+
+.st-per-app-panel {
+  margin-top: 16px;
+}
+
+.st-per-app-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.st-app-search-field {
+  flex: 1;
+  min-width: 240px;
+}
+
+.st-app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.st-app-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+
+.st-app-item.is-selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.st-app-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.st-app-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.st-app-pkg {
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.st-app-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* =========================================================================
+   Responsive Mobile (Phones <= 768px) & Tablet (769px - 1100px) Layouts
+   ========================================================================= */
+
+@media (max-width: 1100px) {
+  .st-workspace,
+  .ab-workspace-grid,
+  .sub-card-body,
+  .sub-modal-charts-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .srv-kpi-grid,
+  .ab-kpi-grid,
+  .usage-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .shell {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: 1fr auto;
+    height: 100dvh;
+  }
+
+  /* Bottom Navigation Bar on Phones */
+  .rail {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    flex-direction: row !important;
+    align-items: center;
+    justify-content: space-between;
+    width: 100% !important;
+    height: calc(64px + env(safe-area-inset-bottom, 0px)) !important;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px)) !important;
+    border-right: none !important;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.14);
+  }
+
+  .rail-brand,
+  .rail-foot {
+    display: none !important;
+  }
+
+  .rail-nav {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 4px !important;
+    width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .rail-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .rail-item {
+    flex: 1 0 62px;
+    min-height: 48px;
+    padding: 6px 4px !important;
+    font-size: 10.5px !important;
+  }
+
+  .page {
+    padding: 16px 14px 88px !important;
+  }
+
+  .page-head {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 10px;
+  }
+
+  .srv-kpi-grid,
+  .ab-kpi-grid,
+  .usage-kpi-grid,
+  .st-mode-grid,
+  .sub-modal-form-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .srv-import-bar,
+  .st-form-row,
+  .setting {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+
+  .srv-node-card,
+  .sub-card-head {
+    flex-direction: column;
+    align-items: flex-start !important;
+  }
+
+  .srv-node-right,
+  .sub-card-actions {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  /* Full-bleed mobile sheets for Modals */
+  .modal {
+    padding: 8px !important;
+  }
+
+  .modal-box {
+    width: 100% !important;
+    max-height: 92dvh !important;
+    border-radius: 18px !important;
+  }
+}
